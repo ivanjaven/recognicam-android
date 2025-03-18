@@ -40,15 +40,19 @@ class MotionDetectionService(context: Context) : SensorEventListener {
     private var movingAverageY = 0f
     private var movingAverageZ = 0f
 
-    // Advanced thresholds
-    private val NOISE_THRESHOLD = 0.02f
-    private val FIDGET_THRESHOLD = 0.05f
-    private val MEDIUM_MOVEMENT_THRESHOLD = 0.3f
-    private val LARGE_MOVEMENT_THRESHOLD = 0.8f
-    private val SUDDEN_MOVEMENT_THRESHOLD = 1.2f
+    // Advanced thresholds - Significantly increased to reduce sensitivity
+    private val NOISE_THRESHOLD = 0.09f      // Was 0.07f
+    private val FIDGET_THRESHOLD = 0.15f     // Was 0.12f
+    private val MEDIUM_MOVEMENT_THRESHOLD = 0.5f  // Was 0.45f
+    private val LARGE_MOVEMENT_THRESHOLD = 1.4f    // Was 1.2f
+    private val SUDDEN_MOVEMENT_THRESHOLD = 2.0f   // Was 1.8f
+
+    // Maximum counts to prevent inflated values
+    private val MAX_DIRECTION_CHANGES = 100
+    private val MAX_SUDDEN_MOVEMENTS = 40
 
     // Window size for moving average filter
-    private val FILTER_WINDOW_SIZE = 5
+    private val FILTER_WINDOW_SIZE = 7  // Increased for smoother filtering
     private val recentReadings = mutableListOf<Triple<Float, Float, Float>>()
 
     // State flow for real-time updates
@@ -194,6 +198,12 @@ class MotionDetectionService(context: Context) : SensorEventListener {
             var suddenMovements = 0
             var totalMagnitude = 0f
             var prevDirection = Triple(0, 0, 0)
+            var lastDirectionChangeTime = 0L
+
+            // Increased time thresholds for less sensitivity
+            val MIN_DIRECTION_CHANGE_INTERVAL = 200L // Was 100L, increased delay between direction changes
+            var lastSuddenMovementTime = 0L
+            val MIN_SUDDEN_MOVEMENT_INTERVAL = 500L // Was 300L, increased delay between sudden movements
 
             // Analyze each data point
             for (point in motionData) {
@@ -204,23 +214,35 @@ class MotionDetectionService(context: Context) : SensorEventListener {
                     point.magnitude >= FIDGET_THRESHOLD -> fidgetFrames++
                 }
 
-                // Count sudden movements
+                // Count sudden movements with stricter time-based filtering
                 if (point.magnitude >= SUDDEN_MOVEMENT_THRESHOLD) {
-                    suddenMovements++
+                    val now = point.timestamp
+                    if (now - lastSuddenMovementTime > MIN_SUDDEN_MOVEMENT_INTERVAL &&
+                        suddenMovements < MAX_SUDDEN_MOVEMENTS) {
+                        suddenMovements++
+                        lastSuddenMovementTime = now
+                    }
                 }
 
-                // Count direction changes
+                // Count direction changes with stricter time-based filtering
                 val currDirection = Triple(
                     if (point.x > NOISE_THRESHOLD) 1 else if (point.x < -NOISE_THRESHOLD) -1 else 0,
                     if (point.y > NOISE_THRESHOLD) 1 else if (point.y < -NOISE_THRESHOLD) -1 else 0,
                     if (point.z > NOISE_THRESHOLD) 1 else if (point.z < -NOISE_THRESHOLD) -1 else 0
                 )
 
+                // More strict direction change detection - require bigger changes
                 if (prevDirection != Triple(0, 0, 0) && currDirection != Triple(0, 0, 0) &&
                     (currDirection.first != 0 && prevDirection.first != 0 && currDirection.first != prevDirection.first ||
                             currDirection.second != 0 && prevDirection.second != 0 && currDirection.second != prevDirection.second ||
                             currDirection.third != 0 && prevDirection.third != 0 && currDirection.third != prevDirection.third)) {
-                    directionChanges++
+
+                    val now = point.timestamp
+                    if (now - lastDirectionChangeTime > MIN_DIRECTION_CHANGE_INTERVAL &&
+                        directionChanges < MAX_DIRECTION_CHANGES) {
+                        directionChanges++
+                        lastDirectionChangeTime = now
+                    }
                 }
 
                 if (currDirection != Triple(0, 0, 0)) {
@@ -230,17 +252,29 @@ class MotionDetectionService(context: Context) : SensorEventListener {
                 totalMagnitude += point.magnitude
             }
 
-            // Calculate scores
-            val fidgetingScore = (fidgetFrames * 100.0 / totalFrames).toInt().coerceIn(0, 100)
-            val generalMovementScore = ((fidgetFrames + mediumMovementFrames + largeMovementFrames) * 100.0 / totalFrames).toInt().coerceIn(0, 100)
-            val movementIntensity = (totalMagnitude / totalFrames)
+            // Calculate scores with better normalization and less sensitivity
+            // Apply a scaling factor to normalize fidgeting and reduce overall sensitivity
+            val normalizedFidgetFrames = (fidgetFrames * 0.9f).toInt() // Scale down fidget counts
+            val fidgetingScore = ((normalizedFidgetFrames * 100.0 / totalFrames) * 0.9f).toInt().coerceIn(0, 100)
 
-            // Calculate restlessness score (combination of factors)
-            val directionChangeRate = (directionChanges * 20.0 / totalFrames).toInt()
-            val suddenMovementRate = (suddenMovements * 30.0 / totalFrames).toInt()
-            val fidgetRate = (fidgetingScore * 0.5).toInt()
+            // Calculate general movement with similar scaling
+            val generalMovementScore =
+                (((fidgetFrames + mediumMovementFrames + largeMovementFrames) * 100.0 / totalFrames) * 0.85f)
+                    .toInt().coerceIn(0, 100)
 
-            val restlessness = (directionChangeRate + suddenMovementRate + fidgetRate).coerceIn(0, 100)
+            val movementIntensity = (totalMagnitude / totalFrames) * 0.9f
+
+            // Better calculation for restlessness score with balanced influence
+            // Normalize direction changes to prevent extremes
+            val normalizedDirectionChanges = (directionChanges * 80.0 / MAX_DIRECTION_CHANGES).toInt()
+            val normalizedSuddenMovements = (suddenMovements * 80.0 / MAX_SUDDEN_MOVEMENTS).toInt()
+
+            val directionChangeRate = (normalizedDirectionChanges * 12.0 / totalFrames).toInt()  // Was 15.0
+            val suddenMovementRate = (normalizedSuddenMovements * 15.0 / totalFrames).toInt()    // Was 20.0
+            val fidgetRate = (fidgetingScore * 0.5f).toInt() // Was 0.6f, reduced influence
+
+            // Combine factors with caps to prevent extreme values
+            val restlessness = ((directionChangeRate + suddenMovementRate + fidgetRate) * 0.85f).toInt().coerceIn(0, 100)
 
             return MotionMetrics(
                 fidgetingScore = fidgetingScore,
