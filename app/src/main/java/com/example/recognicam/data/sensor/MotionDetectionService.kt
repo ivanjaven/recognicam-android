@@ -1,4 +1,3 @@
-// EnhancedMotionDetectionService.kt
 package com.example.recognicam.data.sensor
 
 import android.content.Context
@@ -74,6 +73,9 @@ class MotionDetectionService(context: Context) : SensorEventListener {
         )
 
         _motionMetrics.value = MotionMetrics()
+
+        // Debug logging
+        println("Motion tracking started: $isTrackingActive")
     }
 
     fun stopTracking() {
@@ -81,6 +83,9 @@ class MotionDetectionService(context: Context) : SensorEventListener {
 
         sensorManager.unregisterListener(this)
         isTrackingActive = false
+
+        // Debug logging
+        println("Motion tracking stopped")
     }
 
     fun isTracking(): Boolean = isTrackingActive
@@ -93,6 +98,9 @@ class MotionDetectionService(context: Context) : SensorEventListener {
         movingAverageY = 0f
         movingAverageZ = 0f
         _motionMetrics.value = MotionMetrics()
+
+        // Debug logging
+        println("Motion tracking reset")
     }
 
     override fun onSensorChanged(event: SensorEvent?) {
@@ -134,10 +142,8 @@ class MotionDetectionService(context: Context) : SensorEventListener {
                 )
             }
 
-            // Update metrics in real-time (every 10 data points to avoid excessive calculations)
-            if (motionData.size % 10 == 0) {
-                calculateAndUpdateMetrics()
-            }
+            // Update metrics every data point for more responsive updates
+            calculateAndUpdateMetrics()
         }
 
         // Update last values for next calculation
@@ -248,6 +254,9 @@ class MotionDetectionService(context: Context) : SensorEventListener {
     }
 
     fun getFinalMetrics(): MotionMetrics {
-        return analyzeMotion()
+        // Log final metrics
+        val metrics = analyzeMotion()
+        println("Final motion metrics - Fidgeting: ${metrics.fidgetingScore}%, Restlessness: ${metrics.restlessness}%")
+        return metrics
     }
 }

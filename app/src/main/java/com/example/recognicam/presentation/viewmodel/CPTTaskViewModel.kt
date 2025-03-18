@@ -8,24 +8,43 @@ import androidx.lifecycle.ViewModelProvider
 import com.example.recognicam.core.ServiceLocator
 import com.example.recognicam.data.analysis.ADHDAnalyzer
 import com.example.recognicam.data.analysis.ADHDAssessmentResult
-import com.example.recognicam.data.sensor.MotionDetectionService
-import com.example.recognicam.data.sensor.FaceAnalysisService
 import com.example.recognicam.data.sensor.FaceMetrics
 import com.example.recognicam.data.sensor.MotionMetrics
-import com.example.recognicam.domain.entity.CPTTaskResult
+import com.example.recognicam.domain.entity.CPTTaskResult as DomainCPTTaskResult
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlin.math.sqrt
 import kotlin.random.Random
 
+// Define the presentation model used for UI
+data class CPTTaskResult(
+    val correctResponses: Int,
+    val incorrectResponses: Int,
+    val missedResponses: Int,
+    val responseTimesMs: List<Long>,
+    val accuracy: Int,
+    val averageResponseTime: Int,
+    val responseTimeVariability: Float,
+    val faceMetrics: FaceMetrics,
+    val motionMetrics: MotionMetrics,
+    val adhdAssessment: ADHDAssessmentResult
+)
+
+sealed class CPTTaskState {
+    object Instructions : CPTTaskState()
+    data class Countdown(val count: Int) : CPTTaskState()
+    object Running : CPTTaskState()
+    data class Completed(val result: CPTTaskResult) : CPTTaskState()
+}
+
 class CPTTaskViewModel(
     private val context: Context
 ) : ViewModel() {
 
     private val resultsRepository = ServiceLocator.getResultsRepository()
-    private val motionDetectionService = MotionDetectionService(context)
-    private val faceAnalysisService = FaceAnalysisService()
+    private val motionDetectionService = ServiceLocator.getMotionDetectionService()
+    private val faceAnalysisService = ServiceLocator.getFaceDetectionService()
     private val adhdAnalyzer = ADHDAnalyzer()
 
     // Task UI state
@@ -33,7 +52,7 @@ class CPTTaskViewModel(
     val uiState: StateFlow<CPTTaskState> = _uiState.asStateFlow()
 
     // Task parameters
-    private val _timeRemaining = MutableStateFlow(40) // Default 40 seconds
+    private val _timeRemaining = MutableStateFlow(30) // 30 seconds for quicker testing
     val timeRemaining: StateFlow<Int> = _timeRemaining.asStateFlow()
 
     private val _stimulus = MutableStateFlow<Char?>(null)
@@ -46,8 +65,11 @@ class CPTTaskViewModel(
     val isTargetStimulus: StateFlow<Boolean> = _isTargetStimulus.asStateFlow()
 
     // Sensor metrics streams
-    val faceMetrics: StateFlow<FaceMetrics> = faceAnalysisService.faceMetrics
-    val motionMetrics: StateFlow<MotionMetrics> = motionDetectionService.motionMetrics
+    private val _faceMetrics = MutableStateFlow(FaceMetrics())
+    val faceMetrics: StateFlow<FaceMetrics> = _faceMetrics.asStateFlow()
+
+    private val _motionMetrics = MutableStateFlow(MotionMetrics())
+    val motionMetrics: StateFlow<MotionMetrics> = _motionMetrics.asStateFlow()
 
     // Performance metrics
     private var correctResponses = 0
@@ -59,16 +81,23 @@ class CPTTaskViewModel(
     // Task parameters
     private val letters = listOf('A', 'B', 'C', 'D', 'E', 'F', 'G', 'H', 'I', 'J', 'K', 'L')
     private val targetLetter = 'X'
-    private var taskDuration = 40 // seconds
+    private var taskDuration = 30 // seconds reduced for faster testing
 
     // Timers
     private var mainTimer: CountDownTimer? = null
     private var stimulusTimer: CountDownTimer? = null
+    private var sensorUpdateTimer: CountDownTimer? = null
 
     init {
-        // Start tracking motion when ViewModel is created
+        // Don't start tracking in init - we'll start when the task starts
+        prepareServices()
+    }
+
+    private fun prepareServices() {
+        // Just make sure services are created, but don't start tracking yet
         if (!motionDetectionService.isTracking()) {
-            motionDetectionService.startTracking()
+            // Just initialize without starting
+            motionDetectionService.resetTracking()
         }
     }
 
@@ -94,14 +123,8 @@ class CPTTaskViewModel(
         missedResponses = 0
         responseTimes.clear()
 
-        // Reset sensors
-        motionDetectionService.resetTracking()
-        if (!motionDetectionService.isTracking()) {
-            motionDetectionService.startTracking()
-        }
-
-        faceAnalysisService.reset()
-        faceAnalysisService.start()
+        // Start sensors EXPLICITLY
+        startSensors()
 
         // Set up task state
         _uiState.value = CPTTaskState.Running
@@ -111,9 +134,6 @@ class CPTTaskViewModel(
         mainTimer = object : CountDownTimer(taskDuration * 1000L, 1000) {
             override fun onTick(millisUntilFinished: Long) {
                 _timeRemaining.value = (millisUntilFinished / 1000).toInt()
-
-                // Update sensor metrics periodically
-                motionDetectionService.calculateAndUpdateMetrics()
             }
 
             override fun onFinish() {
@@ -121,8 +141,55 @@ class CPTTaskViewModel(
             }
         }.start()
 
+        // Start a separate timer for sensor updates
+        startSensorUpdateTimer()
+
         // Present first stimulus
         presentNextStimulus()
+    }
+
+    private fun startSensors() {
+        // Make absolutely sure we're resetting and starting both services
+        faceAnalysisService.reset()
+        faceAnalysisService.start()
+
+        motionDetectionService.resetTracking()
+        if (!motionDetectionService.isTracking()) {
+            motionDetectionService.startTracking()
+        }
+
+        // Log initial state to debug console
+        println("Starting sensors - Motion tracking: ${motionDetectionService.isTracking()}")
+    }
+
+    private fun startSensorUpdateTimer() {
+        // Cancel any existing timer
+        sensorUpdateTimer?.cancel()
+
+        // Create a timer that updates sensor data every 500ms
+        sensorUpdateTimer = object : CountDownTimer(taskDuration * 1000L, 500) {
+            override fun onTick(millisUntilFinished: Long) {
+                updateSensorMetrics()
+            }
+
+            override fun onFinish() {
+                // Final update
+                updateSensorMetrics()
+            }
+        }.start()
+    }
+
+    private fun updateSensorMetrics() {
+        // Force manual updates and copy to our local state
+        motionDetectionService.calculateAndUpdateMetrics()
+        _motionMetrics.value = motionDetectionService.getFinalMetrics()
+        _faceMetrics.value = faceAnalysisService.getFinalMetrics()
+
+        // Log updates to debug console occasionally
+        if (Random.nextInt(0, 5) == 0) {
+            println("Sensor update - Face lookAways: ${_faceMetrics.value.lookAwayCount}, " +
+                    "Motion fidget: ${_motionMetrics.value.fidgetingScore}")
+        }
     }
 
     private fun presentNextStimulus() {
@@ -204,10 +271,18 @@ class CPTTaskViewModel(
         // Clean up timers
         mainTimer?.cancel()
         stimulusTimer?.cancel()
+        sensorUpdateTimer?.cancel()
+
+        // One final update of sensor metrics
+        updateSensorMetrics()
 
         // Get final sensor metrics
-        val finalFaceMetrics = faceAnalysisService.getFinalMetrics()
-        val finalMotionMetrics = motionDetectionService.getFinalMetrics()
+        val finalFaceMetrics = _faceMetrics.value
+        val finalMotionMetrics = _motionMetrics.value
+
+        // Log final metrics for debugging
+        println("FINAL METRICS - Face lookAways: ${finalFaceMetrics.lookAwayCount}, " +
+                "Motion fidget: ${finalMotionMetrics.fidgetingScore}")
 
         // Stop tracking
         if (motionDetectionService.isTracking()) {
@@ -230,6 +305,9 @@ class CPTTaskViewModel(
             0
         }
 
+        // Calculate accuracy
+        val accuracy = calculateAccuracy(correctResponses, incorrectResponses, missedResponses)
+
         // Analyze ADHD indicators
         val adhdAssessment = adhdAnalyzer.analyzePerformance(
             correctResponses = correctResponses,
@@ -242,13 +320,29 @@ class CPTTaskViewModel(
             durationSeconds = taskDuration
         )
 
-        // Create result with enhanced metrics
-        val result = EnhancedCPTTaskResult(
+        // Create domain entity for storage in repository
+        val domainResult = DomainCPTTaskResult(
+            correctResponses = correctResponses,
+            incorrectResponses = incorrectResponses,
+            missedResponses = missedResponses,
+            accuracy = accuracy,
+            averageResponseTime = averageResponseTime,
+            fidgetingScore = finalMotionMetrics.fidgetingScore,
+            generalMovementScore = finalMotionMetrics.generalMovementScore,
+            directionChanges = finalMotionMetrics.directionChanges,
+            adhdProbabilityScore = adhdAssessment.adhdProbabilityScore
+        )
+
+        // Save to repository
+        resultsRepository.saveCPTResult(domainResult)
+
+        // Create presentation model for UI
+        val uiResult = CPTTaskResult(
             correctResponses = correctResponses,
             incorrectResponses = incorrectResponses,
             missedResponses = missedResponses,
             responseTimesMs = responseTimes,
-            accuracy = calculateAccuracy(correctResponses, incorrectResponses, missedResponses),
+            accuracy = accuracy,
             averageResponseTime = averageResponseTime,
             responseTimeVariability = responseTimeVariability,
             faceMetrics = finalFaceMetrics,
@@ -256,23 +350,8 @@ class CPTTaskViewModel(
             adhdAssessment = adhdAssessment
         )
 
-        // Save result (convert to basic result for repository if needed)
-        resultsRepository.saveCPTResult(
-            CPTTaskResult(
-                correctResponses = correctResponses,
-                incorrectResponses = incorrectResponses,
-                missedResponses = missedResponses,
-                accuracy = result.accuracy,
-                averageResponseTime = averageResponseTime,
-                fidgetingScore = finalMotionMetrics.fidgetingScore,
-                generalMovementScore = finalMotionMetrics.generalMovementScore,
-                directionChanges = finalMotionMetrics.directionChanges,
-                adhdProbabilityScore = adhdAssessment.adhdProbabilityScore
-            )
-        )
-
-        // Update UI state
-        _uiState.value = CPTTaskState.Completed(result)
+        // Update UI state with the presentation model
+        _uiState.value = CPTTaskState.Completed(uiResult)
     }
 
     private fun calculateAccuracy(correct: Int, incorrect: Int, missed: Int): Int {
@@ -307,6 +386,7 @@ class CPTTaskViewModel(
         super.onCleared()
         mainTimer?.cancel()
         stimulusTimer?.cancel()
+        sensorUpdateTimer?.cancel()
 
         if (motionDetectionService.isTracking()) {
             motionDetectionService.stopTracking()
@@ -322,24 +402,4 @@ class CPTTaskViewModel(
             throw IllegalArgumentException("Unknown ViewModel class")
         }
     }
-}
-
-data class EnhancedCPTTaskResult(
-    val correctResponses: Int,
-    val incorrectResponses: Int,
-    val missedResponses: Int,
-    val responseTimesMs: List<Long>,
-    val accuracy: Int,
-    val averageResponseTime: Int,
-    val responseTimeVariability: Float,
-    val faceMetrics: FaceMetrics,
-    val motionMetrics: MotionMetrics,
-    val adhdAssessment: ADHDAssessmentResult
-)
-
-sealed class CPTTaskState {
-    object Instructions : CPTTaskState()
-    data class Countdown(val count: Int) : CPTTaskState()
-    object Running : CPTTaskState()
-    data class Completed(val result: EnhancedCPTTaskResult) : CPTTaskState()
 }

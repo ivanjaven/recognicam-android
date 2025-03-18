@@ -1,4 +1,3 @@
-// ADHDAnalyzer.kt
 package com.example.recognicam.data.analysis
 
 import com.example.recognicam.data.sensor.FaceMetrics
@@ -122,6 +121,74 @@ class ADHDAnalyzer {
             significance = if (lookAwayRate > 8) 3 else if (lookAwayRate > 5) 2 else 1
         ))
 
+        // NEW: Sustained attention score
+        val sustainedAttentionFactor = when {
+            faceMetrics.sustainedAttentionScore < 30 -> 25 // Poor sustained attention
+            faceMetrics.sustainedAttentionScore < 50 -> 15
+            faceMetrics.sustainedAttentionScore < 70 -> 5
+            else -> 0
+        }
+
+        markers.add(BehavioralMarker(
+            name = "Sustained Attention",
+            value = faceMetrics.sustainedAttentionScore.toFloat(),
+            threshold = 60f,
+            significance = if (faceMetrics.sustainedAttentionScore < 30) 3
+            else if (faceMetrics.sustainedAttentionScore < 50) 2
+            else 1
+        ))
+
+        // NEW: Average look away duration
+        val lookAwayDurationFactor = when {
+            faceMetrics.averageLookAwayDuration > 2000 -> 30 // Very long look-aways
+            faceMetrics.averageLookAwayDuration > 1500 -> 20
+            faceMetrics.averageLookAwayDuration > 1000 -> 10
+            else -> 0
+        }
+
+        markers.add(BehavioralMarker(
+            name = "Look Away Duration",
+            value = faceMetrics.averageLookAwayDuration,
+            threshold = 1500f,
+            significance = if (faceMetrics.averageLookAwayDuration > 2000) 3
+            else if (faceMetrics.averageLookAwayDuration > 1500) 2
+            else 1
+        ))
+
+        // NEW: Attention lapse frequency
+        val attentionLapseFactor = when {
+            faceMetrics.attentionLapseFrequency > 5 -> 25 // Frequent attention lapses
+            faceMetrics.attentionLapseFrequency > 3 -> 15
+            faceMetrics.attentionLapseFrequency > 1 -> 5
+            else -> 0
+        }
+
+        markers.add(BehavioralMarker(
+            name = "Attention Lapses",
+            value = faceMetrics.attentionLapseFrequency,
+            threshold = 3f,
+            significance = if (faceMetrics.attentionLapseFrequency > 5) 3
+            else if (faceMetrics.attentionLapseFrequency > 3) 2
+            else 1
+        ))
+
+        // NEW: Distractibility index
+        val distractibilityFactor = when {
+            faceMetrics.distractibilityIndex > 70 -> 25
+            faceMetrics.distractibilityIndex > 50 -> 15
+            faceMetrics.distractibilityIndex > 30 -> 5
+            else -> 0
+        }
+
+        markers.add(BehavioralMarker(
+            name = "Distractibility",
+            value = faceMetrics.distractibilityIndex.toFloat(),
+            threshold = 50f,
+            significance = if (faceMetrics.distractibilityIndex > 70) 3
+            else if (faceMetrics.distractibilityIndex > 50) 2
+            else 1
+        ))
+
         // Blink rate (hyperactivity marker)
         val normalizedBlinkRate = faceMetrics.blinkRate
         val blinkRateFactor = when {
@@ -152,6 +219,23 @@ class ADHDAnalyzer {
             significance = if (faceMetrics.faceVisiblePercentage < 70) 2 else 1
         ))
 
+        // NEW: Facial movement score (research-backed)
+        val facialMovementFactor = when {
+            faceMetrics.facialMovementScore > 70 -> 20
+            faceMetrics.facialMovementScore > 50 -> 10
+            faceMetrics.facialMovementScore > 30 -> 5
+            else -> 0
+        }
+
+        markers.add(BehavioralMarker(
+            name = "Facial Movement",
+            value = faceMetrics.facialMovementScore.toFloat(),
+            threshold = 50f,
+            significance = if (faceMetrics.facialMovementScore > 70) 3
+            else if (faceMetrics.facialMovementScore > 50) 2
+            else 1
+        ))
+
         // Emotion changes (impulsivity marker)
         val emotionChangeRate = faceMetrics.emotionChanges * minuteMultiplier
         val emotionChangeFactor = when {
@@ -166,6 +250,23 @@ class ADHDAnalyzer {
             value = emotionChangeRate,
             threshold = 3f,
             significance = if (emotionChangeRate > 5) 2 else 1
+        ))
+
+        // NEW: Emotion variability score
+        val emotionVariabilityFactor = when {
+            faceMetrics.emotionVariabilityScore > 70 -> 15
+            faceMetrics.emotionVariabilityScore > 50 -> 10
+            faceMetrics.emotionVariabilityScore > 30 -> 5
+            else -> 0
+        }
+
+        markers.add(BehavioralMarker(
+            name = "Emotion Variability",
+            value = faceMetrics.emotionVariabilityScore.toFloat(),
+            threshold = 50f,
+            significance = if (faceMetrics.emotionVariabilityScore > 70) 2
+            else if (faceMetrics.emotionVariabilityScore > 50) 2
+            else 1
         ))
 
         // ===== Motion metrics =====
@@ -232,21 +333,22 @@ class ADHDAnalyzer {
             significance = if (motionMetrics.restlessness > 70) 3 else if (motionMetrics.restlessness > 50) 2 else 1
         ))
 
-        // Calculate scores by domain
+        // Calculate scores by domain with new research-backed metrics
         val attentionScore = min(100, lookAwayFactor + missedResponseFactor + faceVisibilityFactor +
+                sustainedAttentionFactor + lookAwayDurationFactor + attentionLapseFactor +
                 (accuracyFactor / 2) + (responseTimeFactor / 2))
 
-        val hyperactivityScore = min(100, fidgetingFactor + restlessnessFactor + (blinkRateFactor * 2) +
-                (directionChangeFactor / 2))
+        val hyperactivityScore = min(100, fidgetingFactor + restlessnessFactor + facialMovementFactor +
+                (blinkRateFactor * 2) + (directionChangeFactor / 2))
 
-        val impulsivityScore = min(100, emotionChangeFactor + suddenMovementFactor +
-                (incorrectResponses * 3) + (variabilityFactor / 2))
+        val impulsivityScore = min(100, emotionChangeFactor + suddenMovementFactor + emotionVariabilityFactor +
+                distractibilityFactor + (incorrectResponses * 3) + (variabilityFactor / 2))
 
-        // Calculate overall ADHD probability
-        // Weighting: Attention (50%), Hyperactivity (30%), Impulsivity (20%)
-        val adhdProbabilityScore = min(100, (attentionScore * 0.5 +
-                hyperactivityScore * 0.3 +
-                impulsivityScore * 0.2).toInt())
+        // Calculate overall ADHD probability with enhanced weighting
+        // Weighting: Attention (45%), Hyperactivity (30%), Impulsivity (25%)
+        val adhdProbabilityScore = min(100, (attentionScore * 0.45 +
+                hyperactivityScore * 0.30 +
+                impulsivityScore * 0.25).toInt())
 
         // Calculate confidence level based on data quality
         val confidenceLevel = calculateConfidenceLevel(
@@ -292,9 +394,10 @@ class ADHDAnalyzer {
 
         // More behavioral markers increases confidence
         confidence += when {
-            markerCount >= 8 -> 10
-            markerCount >= 6 -> 5
-            markerCount >= 4 -> 0
+            markerCount >= 15 -> 15 // Increased for the added markers
+            markerCount >= 10 -> 10
+            markerCount >= 8 -> 5
+            markerCount >= 6 -> 0
             else -> -10
         }
 

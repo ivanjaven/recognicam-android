@@ -1,6 +1,9 @@
 package com.example.recognicam.presentation.screens
 
 import android.Manifest
+import android.content.pm.PackageManager
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.camera.core.CameraSelector
 import androidx.camera.core.ImageAnalysis
 import androidx.camera.core.Preview
@@ -13,12 +16,14 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalLifecycleOwner
@@ -34,7 +39,7 @@ import com.example.recognicam.core.utils.getInterpretationText
 import com.example.recognicam.presentation.components.*
 import com.example.recognicam.presentation.viewmodel.CPTTaskState
 import com.example.recognicam.presentation.viewmodel.CPTTaskViewModel
-import com.example.recognicam.presentation.viewmodel.EnhancedCPTTaskResult
+import com.example.recognicam.presentation.viewmodel.CPTTaskResult
 import kotlinx.coroutines.delay
 import java.util.concurrent.Executors
 import kotlin.math.roundToInt
@@ -50,16 +55,26 @@ fun CPTTaskScreen(
         factory = CPTTaskViewModel.Factory(context)
     )
 
-    // Use a simple boolean state for permission instead of accompanist
-    var cameraPermissionGranted by remember { mutableStateOf(false) }
+    // Check if camera permission is already granted
+    var cameraPermissionGranted by remember {
+        mutableStateOf(
+            ContextCompat.checkSelfPermission(
+                context,
+                Manifest.permission.CAMERA
+            ) == PackageManager.PERMISSION_GRANTED
+        )
+    }
 
-    // Request permission when the screen is first shown
+    // Permission launcher
+    val requestPermissionLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.RequestPermission()
+    ) { isGranted ->
+        cameraPermissionGranted = isGranted
+    }
+
+    // Configure task for faster testing
     LaunchedEffect(Unit) {
-        // In a real app, you would check permission here using ActivityResultLauncher
-        // For demo purposes, let's assume permission is granted
-        cameraPermissionGranted = true
-
-        viewModel.setTaskDuration(60) // 60 seconds for regular testing
+        viewModel.setTaskDuration(30) // 30 seconds for faster testing
     }
 
     val uiState by viewModel.uiState.collectAsState()
@@ -68,10 +83,7 @@ fun CPTTaskScreen(
         is CPTTaskState.Instructions -> {
             TaskInstructionsScreen(
                 cameraPermissionGranted = cameraPermissionGranted,
-                onRequestPermission = {
-                    // In a real app, you would launch permission request here
-                    cameraPermissionGranted = true
-                },
+                onRequestPermission = { requestPermissionLauncher.launch(Manifest.permission.CAMERA) },
                 onStartTask = { viewModel.startCountdown() }
             )
         }
@@ -92,7 +104,7 @@ fun CPTTaskScreen(
         }
 
         is CPTTaskState.Completed -> {
-            EnhancedResultsScreen(
+            ResultsScreen(
                 result = state.result,
                 onBackToHome = { navController.navigate("home") {
                     popUpTo("home") { inclusive = true }
@@ -138,13 +150,15 @@ fun TaskInstructionsScreen(
                     "In this task, you will see letters appear on the screen one at a time.",
                     "Tap the screen whenever you see the letter X.",
                     "Try to respond as quickly and accurately as possible.",
-                    "Your face and movements will be analyzed to detect ADHD patterns."
+                    "Your face and movements will be analyzed to detect ADHD patterns.",
+                    "This test will take 30 seconds to complete."
                 ),
                 onButtonPress = onStartTask
             )
         }
     }
 }
+
 @Composable
 fun CPTTaskRunningScreen(
     viewModel: CPTTaskViewModel,
@@ -154,8 +168,6 @@ fun CPTTaskRunningScreen(
     val timeRemaining by viewModel.timeRemaining.collectAsState()
     val stimulus by viewModel.stimulus.collectAsState()
     val stimulusVisible by viewModel.stimulusVisible.collectAsState()
-    val faceMetrics by viewModel.faceMetrics.collectAsState()
-    val motionMetrics by viewModel.motionMetrics.collectAsState()
 
     // Create and remember the camera executor
     val cameraExecutor = remember { Executors.newSingleThreadExecutor() }
@@ -167,13 +179,19 @@ fun CPTTaskRunningScreen(
         }
     }
 
+    // Style similar to GoNoGo and WorkingMemory tasks
     Box(modifier = Modifier.fillMaxSize()) {
-        // Background camera view for face analysis
+        // Solid color background similar to other tasks
+        Box(
+            modifier = Modifier
+                .fillMaxSize()
+                .background(MaterialTheme.colorScheme.background)
+        )
+
+        // Invisible camera view to process facial data
         if (cameraPermissionGranted) {
             AndroidView(
-                modifier = Modifier
-                    .fillMaxSize()
-                    .background(Color.Black),
+                modifier = Modifier.size(1.dp), // Effectively invisible
                 factory = { ctx ->
                     val previewView = PreviewView(ctx)
                     val cameraProviderFuture = ProcessCameraProvider.getInstance(ctx)
@@ -191,9 +209,9 @@ fun CPTTaskRunningScreen(
                             .setBackpressureStrategy(ImageAnalysis.STRATEGY_KEEP_ONLY_LATEST)
                             .build()
                             .also {
-                                it.setAnalyzer(cameraExecutor, { imageProxy ->
+                                it.setAnalyzer(cameraExecutor) { imageProxy ->
                                     viewModel.processFaceImage(imageProxy)
-                                })
+                                }
                             }
 
                         val cameraSelector = CameraSelector.DEFAULT_FRONT_CAMERA
@@ -216,63 +234,42 @@ fun CPTTaskRunningScreen(
             )
         }
 
-        // Semi-transparent overlay for the task
+        // Task UI - similar to other tasks
         Box(
             modifier = Modifier
                 .fillMaxSize()
-                .background(Color.Black.copy(alpha = 0.5f))
                 .clickable { viewModel.handleResponse() }
         ) {
-            // Timer display
+            // Timer display (similar style to other tasks)
             Text(
                 text = "${timeRemaining}s",
                 style = MaterialTheme.typography.titleMedium,
-                color = Color.White,
+                color = MaterialTheme.colorScheme.onBackground,
                 modifier = Modifier
                     .align(Alignment.TopEnd)
                     .padding(20.dp)
             )
 
-            // Live metrics (small display in corner)
-            Column(
-                modifier = Modifier
-                    .align(Alignment.TopStart)
-                    .padding(16.dp)
-                    .background(Color.Black.copy(alpha = 0.5f), RoundedCornerShape(8.dp))
-                    .padding(8.dp)
-            ) {
-                Text(
-                    text = "Look Aways: ${faceMetrics.lookAwayCount}",
-                    color = Color.White,
-                    style = MaterialTheme.typography.bodySmall
-                )
-                Text(
-                    text = "Blinks: ${faceMetrics.blinkCount}",
-                    color = Color.White,
-                    style = MaterialTheme.typography.bodySmall
-                )
-                Text(
-                    text = "Fidget: ${motionMetrics.fidgetingScore}%",
-                    color = Color.White,
-                    style = MaterialTheme.typography.bodySmall
-                )
-            }
-
-            // Main stimulus in center
-            AnimatedStimulus(
-                visible = stimulusVisible,
-                content = {
+            // Main stimulus in center - make sure it's highly visible
+            if (stimulusVisible) {
+                Box(
+                    modifier = Modifier
+                        .size(180.dp)
+                        .align(Alignment.Center)
+                        .clip(RoundedCornerShape(12.dp))
+                        .background(MaterialTheme.colorScheme.primary),
+                    contentAlignment = Alignment.Center
+                ) {
                     Text(
                         text = stimulus?.toString() ?: "",
                         fontSize = 80.sp,
                         fontWeight = FontWeight.Bold,
-                        color = Color.White
+                        color = MaterialTheme.colorScheme.onPrimary
                     )
-                },
-                modifier = Modifier.align(Alignment.Center)
-            )
+                }
+            }
 
-            // Bottom instruction bar
+            // Bottom instruction bar (similar to other tasks)
             Box(modifier = Modifier.align(Alignment.BottomCenter)) {
                 InstructionBar(text = "Tap when you see the letter X")
             }
@@ -281,8 +278,8 @@ fun CPTTaskRunningScreen(
 }
 
 @Composable
-fun EnhancedResultsScreen(
-    result: EnhancedCPTTaskResult,
+fun ResultsScreen(
+    result: CPTTaskResult,
     onBackToHome: () -> Unit
 ) {
     val assessment = result.adhdAssessment
@@ -454,7 +451,7 @@ fun EnhancedResultsScreen(
 }
 
 @Composable
-fun PerformanceMetricsCard(result: EnhancedCPTTaskResult) {
+fun PerformanceMetricsCard(result: CPTTaskResult) {
     Card(
         modifier = Modifier
             .fillMaxWidth()
@@ -557,7 +554,81 @@ fun BehavioralMarkersCard(assessment: com.example.recognicam.data.analysis.ADHDA
 }
 
 @Composable
-fun SensorMetricsCard(result: EnhancedCPTTaskResult) {
+fun BehavioralMarkerItem(marker: com.example.recognicam.data.analysis.BehavioralMarker) {
+    val percentValue = (marker.value / marker.threshold).coerceIn(0f, 2f) * 50f
+
+    Row(
+        modifier = Modifier.fillMaxWidth(),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        // Indicator dots for significance
+        Row(
+            modifier = Modifier.width(36.dp),
+            horizontalArrangement = Arrangement.spacedBy(2.dp)
+        ) {
+            repeat(3) { index ->
+                Box(
+                    modifier = Modifier
+                        .size(8.dp)
+                        .clip(CircleShape)
+                        .background(
+                            if (index < marker.significance)
+                                MaterialTheme.colorScheme.primary
+                            else
+                                Color.LightGray.copy(alpha = 0.3f)
+                        )
+                )
+            }
+        }
+
+        Column(
+            modifier = Modifier.weight(1f)
+        ) {
+            Text(
+                text = marker.name,
+                style = MaterialTheme.typography.bodyMedium,
+                fontWeight = FontWeight.Medium
+            )
+
+            Spacer(modifier = Modifier.height(4.dp))
+
+            // Progress bar
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(6.dp)
+                    .clip(RoundedCornerShape(3.dp))
+                    .background(Color.LightGray.copy(alpha = 0.3f))
+            ) {
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth(percentValue / 100f)
+                        .height(6.dp)
+                        .clip(RoundedCornerShape(3.dp))
+                        .background(
+                            when {
+                                percentValue > 75 -> Color(0xFFE53935)
+                                percentValue > 50 -> Color(0xFFFFA726)
+                                else -> Color(0xFF43A047)
+                            }
+                        )
+                )
+            }
+        }
+
+        // Value
+        Text(
+            text = if (marker.value >= 100) "${marker.value.toInt()}" else "${marker.value}",
+            style = MaterialTheme.typography.bodyMedium,
+            fontWeight = FontWeight.Bold,
+            modifier = Modifier.width(50.dp),
+            textAlign = TextAlign.End
+        )
+    }
+}
+
+@Composable
+fun SensorMetricsCard(result: CPTTaskResult) {
     Card(
         modifier = Modifier
             .fillMaxWidth()
@@ -602,6 +673,32 @@ fun SensorMetricsCard(result: EnhancedCPTTaskResult) {
                 ResultMetricItem(
                     value = "${result.faceMetrics.faceVisiblePercentage}%",
                     label = "Face Detected",
+                    modifier = Modifier.weight(1f)
+                )
+            }
+
+            Spacer(modifier = Modifier.height(8.dp))
+
+            // Additional face metrics row
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween
+            ) {
+                ResultMetricItem(
+                    value = "${result.faceMetrics.distractibilityIndex}%",
+                    label = "Distractibility",
+                    modifier = Modifier.weight(1f)
+                )
+
+                ResultMetricItem(
+                    value = "${result.faceMetrics.sustainedAttentionScore}%",
+                    label = "Sustained Attention",
+                    modifier = Modifier.weight(1f)
+                )
+
+                ResultMetricItem(
+                    value = "${result.faceMetrics.emotionVariabilityScore}%",
+                    label = "Emotion Variability",
                     modifier = Modifier.weight(1f)
                 )
             }
@@ -674,5 +771,39 @@ fun InterpretationCard(assessment: com.example.recognicam.data.analysis.ADHDAsse
                 color = MaterialTheme.colorScheme.error
             )
         }
+    }
+}
+
+@Composable
+fun ResultMetricItem(
+    value: String,
+    label: String,
+    modifier: Modifier = Modifier
+) {
+    Column(
+        modifier = modifier,
+        horizontalAlignment = Alignment.CenterHorizontally
+    ) {
+        Text(
+            text = value,
+            style = MaterialTheme.typography.titleLarge,
+            fontWeight = FontWeight.Bold
+        )
+
+        Text(
+            text = label,
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            textAlign = TextAlign.Center
+        )
+    }
+}
+
+@Composable
+fun getScoreColor(score: Int): Color {
+    return when {
+        score >= 70 -> Color(0xFFE53935) // High (red)
+        score >= 40 -> Color(0xFFFFA726) // Medium (orange)
+        else -> Color(0xFF43A047)        // Low (green)
     }
 }

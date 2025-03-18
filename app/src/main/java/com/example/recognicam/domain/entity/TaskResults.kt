@@ -1,5 +1,10 @@
 package com.example.recognicam.domain.entity
 
+
+import com.example.recognicam.data.analysis.ADHDAssessmentResult
+import com.example.recognicam.data.sensor.FaceMetrics
+import com.example.recognicam.data.sensor.MotionMetrics
+
 data class CPTTaskResult(
     val correctResponses: Int,
     val incorrectResponses: Int,
@@ -9,9 +14,14 @@ data class CPTTaskResult(
     val fidgetingScore: Int = 0,
     val generalMovementScore: Int = 0,
     val directionChanges: Int = 0,
-    val adhdProbabilityScore: Int = 0
+    val adhdProbabilityScore: Int = 0,
+    // Add these fields to support UI functionality
+    val responseTimesMs: List<Long> = emptyList(),
+    val responseTimeVariability: Float = 0f,
+    val faceMetrics: FaceMetrics = FaceMetrics(),
+    val motionMetrics: MotionMetrics = MotionMetrics(),
+    val adhdAssessment: ADHDAssessmentResult? = null
 )
-
 data class ReadingTaskResult(
     val readingTime: Int, // in seconds
     val correctAnswers: Int,
