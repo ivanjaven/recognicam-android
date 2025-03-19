@@ -596,6 +596,7 @@ fun BehavioralMarkersCard(assessment: com.example.recognicam.data.analysis.ADHDA
                 "Response Variability",
                 "Task Accuracy",
                 "Missed Responses",
+                "Emotion Changes",
                 "Face Visibility",
                 "Sustained Attention",
                 "Fidgeting Score",

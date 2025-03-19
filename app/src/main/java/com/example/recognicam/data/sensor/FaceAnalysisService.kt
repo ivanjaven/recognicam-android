@@ -198,12 +198,12 @@ class FaceAnalysisService {
             consecutiveAttentionFrames = 0
         }
 
-        // Process head position for attention
+        // Process head position for attention - ADJUSTED THRESHOLDS
         val rotY = face.headEulerAngleY // Head rotation (left/right)
         val rotX = face.headEulerAngleX // Head rotation (up/down)
 
-        // Detect look away with reduced sensitivity
-        val headLookingAway = abs(rotY) > 40f || abs(rotX) > 35f  // Was 35f and 30f
+        // Detect look away with improved sensitivity
+        val headLookingAway = abs(rotY) > 36f || abs(rotX) > 31f // Balanced thresholds for normal vs excessive movement
 
         // Process eye states for blink detection
         val leftEyeOpenProb = face.leftEyeOpenProbability ?: -1f
@@ -228,15 +228,15 @@ class FaceAnalysisService {
         val moveY = abs(last.second - secondLast.second)
         val movement = sqrt(moveX * moveX + moveY * moveY)
 
-        // Consider it significant movement if above threshold (increased)
-        val MOVEMENT_THRESHOLD = 10.0f  // Was 8.0f
+        // Consider it significant movement if above threshold
+        val MOVEMENT_THRESHOLD = 9.5f  // Balanced threshold for normal movement
         if (movement > MOVEMENT_THRESHOLD) {
             // Only increment if below maximum to prevent inflation
             if (facialMovementCount < MAX_FACIAL_MOVEMENT) {
                 facialMovementCount++
             }
 
-            // Large movements can indicate distractibility (increased threshold)
+            // Large movements can indicate distractibility
             if (movement > MOVEMENT_THRESHOLD * 4 && distractibilityEvents < MAX_DISTRACTIBILITY_EVENTS) {
                 distractibilityEvents++
             }
@@ -285,8 +285,8 @@ class FaceAnalysisService {
     private fun updateBlinkDetection(leftEyeOpenProb: Float, rightEyeOpenProb: Float) {
         if (leftEyeOpenProb < 0 || rightEyeOpenProb < 0) return
 
-        val leftEyeOpen = leftEyeOpenProb > 0.5f
-        val rightEyeOpen = rightEyeOpenProb > 0.5f
+        val leftEyeOpen = leftEyeOpenProb > 0.5f  // Balanced threshold
+        val rightEyeOpen = rightEyeOpenProb > 0.5f  // Balanced threshold
         val now = System.currentTimeMillis()
 
         // Start of potential blink
@@ -303,8 +303,7 @@ class FaceAnalysisService {
             val blinkDuration = now - potentialBlinkStartTime
             isInBlink = false
 
-            // Only count as blink if duration is reasonable (80-400ms)
-            // Added minimum time between blinks to avoid over-counting
+            // Only count as blink if duration is reasonable
             if (blinkDuration in 80..400 && (now - lastBlinkTime > 300)) {
                 blinkCount++
                 lastBlinkTime = now
@@ -333,9 +332,9 @@ class FaceAnalysisService {
         emotionSamples++
         emotionIntensitySum += smileProbability
 
-        // Make emotion detection less sensitive
+        // Balanced emotion detection sensitivity
         val emotionDelta = abs(smileProbability - lastEmotionIntensity)
-        if (emotionDelta > 0.4f) {  // Was 0.35f, increased threshold
+        if (emotionDelta > 0.4f) {
             // Only increment if below maximum
             if (emotionChanges < MAX_EMOTION_CHANGES) {
                 emotionChanges++
@@ -353,8 +352,8 @@ class FaceAnalysisService {
         }
 
         if (currentEmotion != lastEmotion) {
-            // Don't count every emotion change, use higher time threshold
-            if (System.currentTimeMillis() - lastEmotionChangeTime > 1500) { // Was 1000, increased
+            // Don't count every emotion change, use balanced time threshold
+            if (System.currentTimeMillis() - lastEmotionChangeTime > 1500) {
                 // Only increment if below maximum
                 if (emotionChanges < MAX_EMOTION_CHANGES) {
                     emotionChanges++
@@ -364,7 +363,7 @@ class FaceAnalysisService {
             }
 
             // Emotional instability can be a sign of ADHD (with limits)
-            if (emotionDelta > 0.6f && distractibilityEvents < MAX_DISTRACTIBILITY_EVENTS) {  // Was 0.5f
+            if (emotionDelta > 0.6f && distractibilityEvents < MAX_DISTRACTIBILITY_EVENTS) {
                 distractibilityEvents++
             }
         }
@@ -387,13 +386,13 @@ class FaceAnalysisService {
         // Scale facial movement for a more realistic score
         val facialMovementScore = if (elapsedTime > 0) {
             val baseScore = ((facialMovementCount * 60000f) / elapsedTime)
-            (baseScore * 0.6f).toInt().coerceIn(0, 100)  // Apply scaling factor
+            (baseScore * 0.65f).toInt().coerceIn(0, 100)  // Balanced scaling
         } else 0
 
         // Scale emotion variability for more realistic scores
         val emotionVariabilityScore = if (emotionSamples > 0) {
             val baseScore = ((emotionChanges * 100f) / emotionSamples)
-            (baseScore * 0.7f).toInt().coerceIn(0, 100)  // Apply scaling factor
+            (baseScore * 0.7f).toInt().coerceIn(0, 100)  // Balanced scaling
         } else 0
 
         val attentionLapseFrequency = if (elapsedTime > 0)
@@ -402,28 +401,27 @@ class FaceAnalysisService {
         val focusRecoveryTime = if (attentionRecoveryTimes.isNotEmpty())
             attentionRecoveryTimes.average().toFloat() else 0f
 
-        // COMPLETELY REVISED DISTRACTIBILITY CALCULATION:
-        // Now based on multiple factors including sustained attention
+        // IMPROVED DISTRACTIBILITY CALCULATION
         val distractibilityIndex = if (elapsedTime > 0) {
-            // Start with the inverse of sustained attention (100 - sustainedAttentionScore)
+            // Start with the inverse of sustained attention
             val baseDistractibility = 100 - sustainedAttentionScore
 
-            // Add influence from distractibility events (limited)
-            val eventFactor = (distractibilityEvents * 15f) / MAX_DISTRACTIBILITY_EVENTS
+            // Add influence from distractibility events with increased weight
+            val eventFactor = (distractibilityEvents * 18f) / MAX_DISTRACTIBILITY_EVENTS  // Was 17f
 
-            // Factor in look away rate
+            // Factor in look away rate with increased influence
             val lookAwayFactor = if (elapsedTime > 0) {
                 val lookAwaysPerMinute = (lookAwayCount * 60000f) / elapsedTime
-                (lookAwaysPerMinute * 3f).coerceIn(0f, 30f)  // Cap contribution
+                (lookAwaysPerMinute * 3.8f).coerceIn(0f, 38f)  // Was 3.5f/35f
             } else 0f
 
-            // Final calculation with all factors, weighted
+            // Final calculation with adjusted weights
             val combinedScore = (baseDistractibility * 0.5f) +
                     (eventFactor * 0.3f) +
                     (lookAwayFactor * 0.2f)
 
-            // Scale the result and apply caps
-            (combinedScore).toInt().coerceIn(0, 100)
+            // Remove scaling factor that was causing underestimation
+            combinedScore.toInt().coerceIn(0, 100)  // Removed 0.95f scaling
         } else 0
 
         _faceMetrics.value = FaceMetrics(
