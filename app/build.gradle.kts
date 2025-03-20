@@ -79,6 +79,7 @@ dependencies {
 
     // Permissions handling
     implementation("com.google.accompanist:accompanist-permissions:0.30.1")
+    implementation(libs.firebase.perf.ktx)
 
     // Testing dependencies
     testImplementation(libs.junit)
@@ -88,4 +89,5 @@ dependencies {
     androidTestImplementation("androidx.compose.ui:ui-test-junit4")
     debugImplementation("androidx.compose.ui:ui-tooling")
     debugImplementation("androidx.compose.ui:ui-test-manifest")
+
 }

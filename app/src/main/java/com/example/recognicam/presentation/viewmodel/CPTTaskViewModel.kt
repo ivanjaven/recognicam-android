@@ -1,11 +1,9 @@
-// CPTTaskViewModel with sensor integration
 package com.example.recognicam.presentation.viewmodel
 
 import android.content.Context
 import android.os.CountDownTimer
-import androidx.lifecycle.ViewModel
 import androidx.lifecycle.ViewModelProvider
-import com.example.recognicam.core.ServiceLocator
+import com.example.recognicam.core.base.BaseAssessmentTaskViewModel
 import com.example.recognicam.data.analysis.ADHDAnalyzer
 import com.example.recognicam.data.analysis.ADHDAssessmentResult
 import com.example.recognicam.data.sensor.FaceMetrics
@@ -17,7 +15,15 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlin.math.sqrt
 import kotlin.random.Random
 
-// Define the presentation model used for UI
+// Definition of UI state for CPT task
+sealed class CPTTaskState {
+    object Instructions : CPTTaskState()
+    data class Countdown(val count: Int) : CPTTaskState()
+    object Running : CPTTaskState()
+    data class Completed(val result: CPTTaskResult) : CPTTaskState()
+}
+
+// UI model for results
 data class CPTTaskResult(
     val correctResponses: Int,
     val incorrectResponses: Int,
@@ -31,30 +37,17 @@ data class CPTTaskResult(
     val adhdAssessment: ADHDAssessmentResult
 )
 
-sealed class CPTTaskState {
-    object Instructions : CPTTaskState()
-    data class Countdown(val count: Int) : CPTTaskState()
-    object Running : CPTTaskState()
-    data class Completed(val result: CPTTaskResult) : CPTTaskState()
-}
-
 class CPTTaskViewModel(
     private val context: Context
-) : ViewModel() {
+) : BaseAssessmentTaskViewModel() {
 
-    private val resultsRepository = ServiceLocator.getResultsRepository()
-    private val motionDetectionService = ServiceLocator.getMotionDetectionService()
-    private val faceAnalysisService = ServiceLocator.getFaceDetectionService()
     private val adhdAnalyzer = ADHDAnalyzer()
 
     // Task UI state
     private val _uiState = MutableStateFlow<CPTTaskState>(CPTTaskState.Instructions)
     val uiState: StateFlow<CPTTaskState> = _uiState.asStateFlow()
 
-    // Task parameters
-    private val _timeRemaining = MutableStateFlow(30) // 30 seconds for quicker testing
-    val timeRemaining: StateFlow<Int> = _timeRemaining.asStateFlow()
-
+    // CPT specific states
     private val _stimulus = MutableStateFlow<Char?>(null)
     val stimulus: StateFlow<Char?> = _stimulus.asStateFlow()
 
@@ -63,13 +56,6 @@ class CPTTaskViewModel(
 
     private val _isTargetStimulus = MutableStateFlow(false)
     val isTargetStimulus: StateFlow<Boolean> = _isTargetStimulus.asStateFlow()
-
-    // Sensor metrics streams
-    private val _faceMetrics = MutableStateFlow(FaceMetrics())
-    val faceMetrics: StateFlow<FaceMetrics> = _faceMetrics.asStateFlow()
-
-    private val _motionMetrics = MutableStateFlow(MotionMetrics())
-    val motionMetrics: StateFlow<MotionMetrics> = _motionMetrics.asStateFlow()
 
     // Performance metrics
     private var correctResponses = 0
@@ -81,22 +67,11 @@ class CPTTaskViewModel(
     // Task parameters
     private val letters = listOf('A', 'B', 'C', 'D', 'E', 'F', 'G', 'H', 'I', 'J', 'K', 'L')
     private val targetLetter = 'X'
-    private var taskDuration = 30 // seconds reduced for faster testing
-
-    // Timers
-    private var mainTimer: CountDownTimer? = null
     private var stimulusTimer: CountDownTimer? = null
-    private var sensorUpdateTimer: CountDownTimer? = null
 
     init {
-        // Don't start tracking in init - we'll start when the task starts
-        prepareServices()
-    }
-
-    private fun prepareServices() {
-        // Just make sure services are created, but don't start tracking yet
+        // Just initialize the services without starting them
         if (!motionDetectionService.isTracking()) {
-            // Just initialize without starting
             motionDetectionService.resetTracking()
         }
     }
@@ -104,92 +79,32 @@ class CPTTaskViewModel(
     fun startCountdown() {
         _uiState.value = CPTTaskState.Countdown(3)
 
-        object : CountDownTimer(3000, 1000) {
-            override fun onTick(millisUntilFinished: Long) {
-                val secondsLeft = millisUntilFinished / 1000 + 1
-                _uiState.value = CPTTaskState.Countdown(secondsLeft.toInt())
-            }
-
-            override fun onFinish() {
-                startTask()
-            }
-        }.start()
+        super.startCountdown(3) {
+            startTask()
+        }
     }
 
-    private fun startTask() {
+    override fun startTask() {
         // Reset metrics
         correctResponses = 0
         incorrectResponses = 0
         missedResponses = 0
         responseTimes.clear()
 
-        // Start sensors EXPLICITLY
+        // Start sensors
         startSensors()
 
         // Set up task state
         _uiState.value = CPTTaskState.Running
-        _timeRemaining.value = taskDuration
 
         // Start main timer
-        mainTimer = object : CountDownTimer(taskDuration * 1000L, 1000) {
-            override fun onTick(millisUntilFinished: Long) {
-                _timeRemaining.value = (millisUntilFinished / 1000).toInt()
-            }
+        startMainTimer()
 
-            override fun onFinish() {
-                completeTask()
-            }
-        }.start()
-
-        // Start a separate timer for sensor updates
+        // Start sensor update timer
         startSensorUpdateTimer()
 
         // Present first stimulus
         presentNextStimulus()
-    }
-
-    private fun startSensors() {
-        // Make absolutely sure we're resetting and starting both services
-        faceAnalysisService.reset()
-        faceAnalysisService.start()
-
-        motionDetectionService.resetTracking()
-        if (!motionDetectionService.isTracking()) {
-            motionDetectionService.startTracking()
-        }
-
-        // Log initial state to debug console
-        println("Starting sensors - Motion tracking: ${motionDetectionService.isTracking()}")
-    }
-
-    private fun startSensorUpdateTimer() {
-        // Cancel any existing timer
-        sensorUpdateTimer?.cancel()
-
-        // Create a timer that updates sensor data every 500ms
-        sensorUpdateTimer = object : CountDownTimer(taskDuration * 1000L, 500) {
-            override fun onTick(millisUntilFinished: Long) {
-                updateSensorMetrics()
-            }
-
-            override fun onFinish() {
-                // Final update
-                updateSensorMetrics()
-            }
-        }.start()
-    }
-
-    private fun updateSensorMetrics() {
-        // Force manual updates and copy to our local state
-        motionDetectionService.calculateAndUpdateMetrics()
-        _motionMetrics.value = motionDetectionService.getFinalMetrics()
-        _faceMetrics.value = faceAnalysisService.getFinalMetrics()
-
-        // Log updates to debug console occasionally
-        if (Random.nextInt(0, 5) == 0) {
-            println("Sensor update - Face lookAways: ${_faceMetrics.value.lookAwayCount}, " +
-                    "Motion fidget: ${_motionMetrics.value.fidgetingScore}")
-        }
     }
 
     private fun presentNextStimulus() {
@@ -267,7 +182,7 @@ class CPTTaskViewModel(
         presentNextStimulus()
     }
 
-    private fun completeTask() {
+    override fun completeTask() {
         // Clean up timers
         mainTimer?.cancel()
         stimulusTimer?.cancel()
@@ -330,7 +245,12 @@ class CPTTaskViewModel(
             fidgetingScore = finalMotionMetrics.fidgetingScore,
             generalMovementScore = finalMotionMetrics.generalMovementScore,
             directionChanges = finalMotionMetrics.directionChanges,
-            adhdProbabilityScore = adhdAssessment.adhdProbabilityScore
+            adhdProbabilityScore = adhdAssessment.adhdProbabilityScore,
+            responseTimesMs = responseTimes,
+            responseTimeVariability = responseTimeVariability,
+            faceMetrics = finalFaceMetrics,
+            motionMetrics = finalMotionMetrics,
+            adhdAssessment = adhdAssessment
         )
 
         // Save to repository
@@ -368,12 +288,6 @@ class CPTTaskViewModel(
         return ((hitRate + correctRejectionRate) / 2 * 100).toInt()
     }
 
-    fun setTaskDuration(seconds: Int) {
-        if (_uiState.value == CPTTaskState.Instructions) {
-            taskDuration = seconds
-        }
-    }
-
     fun processFaceImage(imageProxy: androidx.camera.core.ImageProxy) {
         if (_uiState.value == CPTTaskState.Running) {
             faceAnalysisService.processImage(imageProxy)
@@ -384,18 +298,12 @@ class CPTTaskViewModel(
 
     override fun onCleared() {
         super.onCleared()
-        mainTimer?.cancel()
         stimulusTimer?.cancel()
-        sensorUpdateTimer?.cancel()
-
-        if (motionDetectionService.isTracking()) {
-            motionDetectionService.stopTracking()
-        }
     }
 
     class Factory(private val context: Context) : ViewModelProvider.Factory {
         @Suppress("UNCHECKED_CAST")
-        override fun <T : ViewModel> create(modelClass: Class<T>): T {
+        override fun <T : androidx.lifecycle.ViewModel> create(modelClass: Class<T>): T {
             if (modelClass.isAssignableFrom(CPTTaskViewModel::class.java)) {
                 return CPTTaskViewModel(context) as T
             }

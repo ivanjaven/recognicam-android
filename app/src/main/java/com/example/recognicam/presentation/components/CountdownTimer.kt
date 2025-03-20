@@ -4,10 +4,7 @@ import androidx.compose.animation.core.*
 import androidx.compose.foundation.layout.*
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
-import androidx.compose.runtime.Composable
-import androidx.compose.runtime.LaunchedEffect
-import androidx.compose.runtime.getValue
-import androidx.compose.runtime.remember
+import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.graphicsLayer
@@ -21,6 +18,9 @@ fun CountdownTimer(
     initialValue: Int,
     onComplete: () -> Unit
 ) {
+    // Keep track of the current count value
+    var currentCount by remember { mutableStateOf(initialValue) }
+
     val infiniteTransition = rememberInfiniteTransition(label = "countdown-animation")
     val scale by infiniteTransition.animateFloat(
         initialValue = 1f,
@@ -32,8 +32,13 @@ fun CountdownTimer(
         label = "scale-animation"
     )
 
+    // Effect to count down from initialValue to 0
     LaunchedEffect(initialValue) {
-        delay(initialValue * 1000L)
+        currentCount = initialValue
+        while (currentCount > 0) {
+            delay(1000L)
+            currentCount -= 1
+        }
         onComplete()
     }
 
@@ -49,7 +54,7 @@ fun CountdownTimer(
         )
 
         Text(
-            text = initialValue.toString(),
+            text = "$currentCount",
             fontSize = 80.sp,
             fontWeight = FontWeight.Bold,
             color = MaterialTheme.colorScheme.primary,
