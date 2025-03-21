@@ -18,6 +18,13 @@ fun AppNavigation() {
         composable("home") {
             HomeScreen(navController)
         }
+
+        // Add the full assessment route
+        composable("full_assessment") {
+            FullAssessmentScreen(navController)
+        }
+
+        // Individual task routes
         composable("cpt_task") {
             CPTTaskScreen(navController)
         }
