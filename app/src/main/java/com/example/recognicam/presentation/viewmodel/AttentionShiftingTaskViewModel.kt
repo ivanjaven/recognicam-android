@@ -1,27 +1,58 @@
 package com.example.recognicam.presentation.viewmodel
 
+import android.content.Context
 import android.os.CountDownTimer
-import androidx.lifecycle.ViewModel
-import com.example.recognicam.core.ServiceLocator
-import com.example.recognicam.domain.entity.AttentionShiftingTaskResult
+import androidx.lifecycle.ViewModelProvider
+import com.example.recognicam.core.base.BaseAssessmentTaskViewModel
+import com.example.recognicam.data.analysis.ADHDAnalyzer
+import com.example.recognicam.data.analysis.ADHDAssessmentResult
+import com.example.recognicam.data.sensor.FaceMetrics
+import com.example.recognicam.data.sensor.MotionMetrics
+import com.example.recognicam.domain.entity.AttentionShiftingTaskResult as DomainAttentionShiftingTaskResult
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlin.math.sqrt
 import kotlin.random.Random
 
-class AttentionShiftingTaskViewModel : ViewModel() {
+enum class Rule {
+    COLOR, SHAPE
+}
 
-    private val resultsRepository = ServiceLocator.getResultsRepository()
-    private val motionDetectionService = ServiceLocator.getMotionDetectionService()
+sealed class AttentionShiftingTaskState {
+    object Instructions : AttentionShiftingTaskState()
+    data class Countdown(val count: Int) : AttentionShiftingTaskState()
+    object Running : AttentionShiftingTaskState()
+    data class Completed(val result: AttentionShiftingTaskResultUI) : AttentionShiftingTaskState()
+}
+
+// UI model for results (matching CPT format)
+data class AttentionShiftingTaskResultUI(
+    val correctResponses: Int,
+    val incorrectResponses: Int,
+    val missedResponses: Int,
+    val averageResponseTime: Int,
+    val responseTimeVariability: Float,
+    val accuracy: Int,
+    val shiftingCost: Int,
+    val ruleShifts: Int,
+    val responseTimesMs: List<Long>,
+    val faceMetrics: FaceMetrics,
+    val motionMetrics: MotionMetrics,
+    val adhdAssessment: ADHDAssessmentResult
+)
+
+class AttentionShiftingTaskViewModel(
+    private val context: Context
+) : BaseAssessmentTaskViewModel() {
+
+    private val adhdAnalyzer = ADHDAnalyzer()
 
     // Task UI state
     private val _uiState = MutableStateFlow<AttentionShiftingTaskState>(AttentionShiftingTaskState.Instructions)
     val uiState: StateFlow<AttentionShiftingTaskState> = _uiState.asStateFlow()
 
     // Task parameters
-    private val _timeRemaining = MutableStateFlow(60) // Default 60 seconds
-    val timeRemaining: StateFlow<Int> = _timeRemaining.asStateFlow()
-
     private val _currentShape = MutableStateFlow<String?>(null)
     val currentShape: StateFlow<String?> = _currentShape.asStateFlow()
 
@@ -47,42 +78,32 @@ class AttentionShiftingTaskViewModel : ViewModel() {
     private var justShifted = false
     private var isTargetStimulus = false
     private var respondedToCurrent = false
+    private var ruleShifts = 0
+    private var stimulusShownTime = 0L
 
     // Options for the task
     private val shapes = listOf("square", "circle")
     private val colors = listOf("blue", "red")
 
-    // Task parameters
-    private var taskDuration = 60 // seconds
-
-    // Timers
-    private var mainTimer: CountDownTimer? = null
+    // Stimuli timer
     private var stimulusTimer: CountDownTimer? = null
-    private var stimulusShownTime = 0L
 
     init {
-        // Start tracking motion when ViewModel is created
+        // Just initialize the services without starting them
         if (!motionDetectionService.isTracking()) {
-            motionDetectionService.startTracking()
+            motionDetectionService.resetTracking()
         }
     }
 
     fun startCountdown() {
         _uiState.value = AttentionShiftingTaskState.Countdown(3)
 
-        object : CountDownTimer(3000, 1000) {
-            override fun onTick(millisUntilFinished: Long) {
-                val secondsLeft = millisUntilFinished / 1000 + 1
-                _uiState.value = AttentionShiftingTaskState.Countdown(secondsLeft.toInt())
-            }
-
-            override fun onFinish() {
-                startTask()
-            }
-        }.start()
+        super.startCountdown(3) {
+            startTask()
+        }
     }
 
-    private fun startTask() {
+    override fun startTask() {
         // Reset metrics
         correctResponses = 0
         incorrectResponses = 0
@@ -94,28 +115,20 @@ class AttentionShiftingTaskViewModel : ViewModel() {
         // Reset task state
         trialCount = 0
         justShifted = false
+        ruleShifts = 0
         _currentRule.value = Rule.COLOR
 
-        // Reset motion tracking
-        motionDetectionService.resetTracking()
-        if (!motionDetectionService.isTracking()) {
-            motionDetectionService.startTracking()
-        }
+        // Start sensors
+        startSensors()
 
         // Set up task state
         _uiState.value = AttentionShiftingTaskState.Running
-        _timeRemaining.value = taskDuration
 
         // Start main timer
-        mainTimer = object : CountDownTimer(taskDuration * 1000L, 1000) {
-            override fun onTick(millisUntilFinished: Long) {
-                _timeRemaining.value = (millisUntilFinished / 1000).toInt()
-            }
+        startMainTimer()
 
-            override fun onFinish() {
-                completeTask()
-            }
-        }.start()
+        // Start sensor update timer
+        startSensorUpdateTimer()
 
         // Present first stimulus
         presentNextStimulus()
@@ -143,8 +156,8 @@ class AttentionShiftingTaskViewModel : ViewModel() {
                 // Increment trial count
                 trialCount++
 
-                // Check if we should shift rules (every 7 trials)
-                val shouldShiftRule = trialCount % 7 == 0 && trialCount > 0
+                // Check if we should shift rules - CHANGED FROM EVERY 7 TRIALS TO EVERY 5 TRIALS
+                val shouldShiftRule = trialCount % 5 == 0 && trialCount > 0
 
                 if (shouldShiftRule) {
                     _currentRule.value = when (_currentRule.value) {
@@ -152,9 +165,10 @@ class AttentionShiftingTaskViewModel : ViewModel() {
                         Rule.SHAPE -> Rule.COLOR
                     }
                     justShifted = true
+                    ruleShifts++
                 } else {
-                    // Reset justShifted after 3 trials following a rule change
-                    if (trialCount % 7 >= 3) {
+                    // Reset justShifted after 2 trials following a rule change
+                    if (trialCount % 5 >= 2) {
                         justShifted = false
                     }
                 }
@@ -227,29 +241,46 @@ class AttentionShiftingTaskViewModel : ViewModel() {
         presentNextStimulus()
     }
 
-    private fun completeTask() {
+    override fun completeTask() {
         // Clean up timers
         mainTimer?.cancel()
         stimulusTimer?.cancel()
+        sensorUpdateTimer?.cancel()
 
-        // Stop motion tracking and analyze results
-        val motionResults = if (motionDetectionService.isTracking()) {
+        // Final check for missed target
+        if (isTargetStimulus && !respondedToCurrent) {
+            missedResponses++
+        }
+
+        // One final update of sensor metrics
+        updateSensorMetrics()
+
+        // Get final sensor metrics
+        val finalFaceMetrics = _faceMetrics.value
+        val finalMotionMetrics = _motionMetrics.value
+
+        // Stop tracking
+        if (motionDetectionService.isTracking()) {
             motionDetectionService.stopTracking()
-            motionDetectionService.analyzeMotion()
-        } else {
-            null
         }
 
         // Calculate performance metrics
-        val totalResponses = correctResponses + incorrectResponses
         val totalTrials = correctResponses + incorrectResponses + missedResponses
-
-        val accuracy = if (totalResponses > 0) (correctResponses * 100) / totalResponses else 0
+        val accuracy = if (totalTrials > 0) (correctResponses * 100) / totalTrials else 0
 
         val averageResponseTime = if (responseTimes.isNotEmpty()) {
             responseTimes.average().toInt()
         } else {
             0
+        }
+
+        // Calculate response time variability (standard deviation)
+        val responseTimeVariability = if (responseTimes.size > 1) {
+            val mean = responseTimes.average()
+            val variance = responseTimes.map { (it - mean) * (it - mean) }.sum() / responseTimes.size
+            sqrt(variance).toFloat()
+        } else {
+            0f
         }
 
         // Calculate shifting cost (difference in response time after a rule shift)
@@ -266,68 +297,77 @@ class AttentionShiftingTaskViewModel : ViewModel() {
         }
 
         val shiftingCost = if (avgRegularRT > 0 && avgPostShiftRT > 0) {
-            Math.max(0, avgPostShiftRT - avgRegularRT)
+            kotlin.math.max(0, avgPostShiftRT - avgRegularRT)
         } else {
             0
         }
 
-        // Calculate ADHD probability
-        val shiftingFactor = when {
-            shiftingCost > 300 -> 40
-            shiftingCost > 200 -> 30
-            shiftingCost > 100 -> 20
-            else -> 10
-        }
+        // Analyze ADHD indicators
+        val adhdAssessment = adhdAnalyzer.analyzePerformance(
+            correctResponses = correctResponses,
+            incorrectResponses = incorrectResponses,
+            missedResponses = missedResponses,
+            averageResponseTime = averageResponseTime,
+            responseTimeVariability = responseTimeVariability,
+            faceMetrics = finalFaceMetrics,
+            motionMetrics = finalMotionMetrics,
+            durationSeconds = taskDuration
+        )
 
-        val accuracyFactor = when {
-            accuracy < 60 -> 30
-            accuracy < 75 -> 20
-            accuracy < 85 -> 10
-            else -> 0
-        }
-
-        val motionFactor = (motionResults?.fidgetingScore?.div(5) ?: 0).coerceAtMost(20)
-
-        val adhdProbabilityScore = (shiftingFactor + accuracyFactor + motionFactor)
-            .coerceIn(0, 100)
-
-        val result = AttentionShiftingTaskResult(
+        // Create domain entity for storage in repository
+        val domainResult = DomainAttentionShiftingTaskResult(
             correctResponses = correctResponses,
             incorrectResponses = incorrectResponses,
             missedResponses = missedResponses,
             accuracy = accuracy,
             averageResponseTime = averageResponseTime,
             shiftingCost = shiftingCost,
-            adhdProbabilityScore = adhdProbabilityScore
+            adhdProbabilityScore = adhdAssessment.adhdProbabilityScore
         )
 
-        // Save result
-        resultsRepository.saveAttentionShiftingResult(result)
+        // Save to repository
+        resultsRepository.saveAttentionShiftingResult(domainResult)
 
-        // Update UI state
-        _uiState.value = AttentionShiftingTaskState.Completed(result)
+        // Create presentation model for UI (matching CPT format)
+        val uiResult = AttentionShiftingTaskResultUI(
+            correctResponses = correctResponses,
+            incorrectResponses = incorrectResponses,
+            missedResponses = missedResponses,
+            averageResponseTime = averageResponseTime,
+            responseTimeVariability = responseTimeVariability,
+            accuracy = accuracy,
+            shiftingCost = shiftingCost,
+            ruleShifts = ruleShifts,
+            responseTimesMs = responseTimes,
+            faceMetrics = finalFaceMetrics,
+            motionMetrics = finalMotionMetrics,
+            adhdAssessment = adhdAssessment
+        )
+
+        // Update UI state with the presentation model
+        _uiState.value = AttentionShiftingTaskState.Completed(uiResult)
     }
 
-    fun setTaskDuration(seconds: Int) {
-        if (_uiState.value == AttentionShiftingTaskState.Instructions) {
-            taskDuration = seconds
+    fun processFaceImage(imageProxy: androidx.camera.core.ImageProxy) {
+        if (_uiState.value == AttentionShiftingTaskState.Running) {
+            faceAnalysisService.processImage(imageProxy)
+        } else {
+            imageProxy.close()
         }
     }
 
     override fun onCleared() {
         super.onCleared()
-        mainTimer?.cancel()
         stimulusTimer?.cancel()
     }
-}
 
-enum class Rule {
-    COLOR, SHAPE
-}
-
-sealed class AttentionShiftingTaskState {
-    object Instructions : AttentionShiftingTaskState()
-    data class Countdown(val count: Int) : AttentionShiftingTaskState()
-    object Running : AttentionShiftingTaskState()
-    data class Completed(val result: AttentionShiftingTaskResult) : AttentionShiftingTaskState()
+    class Factory(private val context: Context) : ViewModelProvider.Factory {
+        @Suppress("UNCHECKED_CAST")
+        override fun <T : androidx.lifecycle.ViewModel> create(modelClass: Class<T>): T {
+            if (modelClass.isAssignableFrom(AttentionShiftingTaskViewModel::class.java)) {
+                return AttentionShiftingTaskViewModel(context) as T
+            }
+            throw IllegalArgumentException("Unknown ViewModel class")
+        }
+    }
 }
