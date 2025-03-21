@@ -1,13 +1,61 @@
-// ReadingTaskViewModel.kt
 package com.example.recognicam.presentation.viewmodel
 
-import androidx.lifecycle.ViewModel
+import android.content.Context
+import android.os.CountDownTimer
+import androidx.lifecycle.ViewModelProvider
+import com.example.recognicam.core.base.BaseAssessmentTaskViewModel
+import com.example.recognicam.data.analysis.ADHDAnalyzer
+import com.example.recognicam.data.analysis.ADHDAssessmentResult
+import com.example.recognicam.data.sensor.FaceMetrics
+import com.example.recognicam.data.sensor.MotionMetrics
 import com.example.recognicam.domain.entity.ReadingTaskResult
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 
-class ReadingTaskViewModel : ViewModel() {
+// Definition of UI state for Reading task
+sealed class ReadingTaskState {
+    object Instructions : ReadingTaskState()
+    data class Countdown(val count: Int) : ReadingTaskState()
+    data class Reading(val passage: ReadingPassage) : ReadingTaskState()
+    data class Questions(
+        val question: Question,
+        val currentIndex: Int,
+        val totalQuestions: Int
+    ) : ReadingTaskState()
+    data class Completed(val result: ReadingTaskResultUI) : ReadingTaskState()
+}
+
+data class ReadingPassage(
+    val title: String,
+    val content: String,
+    val questions: List<Question>
+)
+
+data class Question(
+    val id: Int,
+    val text: String,
+    val options: List<String>,
+    val correctAnswerIndex: Int
+)
+
+// UI model for results (matching CPT format)
+data class ReadingTaskResultUI(
+    val readingTime: Int, // in seconds
+    val correctAnswers: Int,
+    val incorrectAnswers: Int,
+    val readingSpeed: Int, // words per minute
+    val comprehensionScore: Int,
+    val faceMetrics: FaceMetrics,
+    val motionMetrics: MotionMetrics,
+    val adhdAssessment: ADHDAssessmentResult
+)
+
+class ReadingTaskViewModel(
+    private val context: Context
+) : BaseAssessmentTaskViewModel() {
+
+    private val adhdAnalyzer = ADHDAnalyzer()
 
     // Task UI state
     private val _uiState = MutableStateFlow<ReadingTaskState>(ReadingTaskState.Instructions)
@@ -25,69 +73,133 @@ class ReadingTaskViewModel : ViewModel() {
     private var readingEndTime = 0L
     private var correctAnswers = 0
     private var incorrectAnswers = 0
+    private var selectedAnswers = mutableMapOf<Int, Int>() // Question ID to selected answer index
 
-    // Passage and questions
+    // Child-friendly passage
     private val passage = ReadingPassage(
-        title = "The Human Brain",
+        title = "The Amazing Animal Friends",
         content = """
-            The human brain is the central organ of the human nervous system. Along with the spinal cord, it makes up the central nervous system. The brain consists of the cerebrum, the brainstem and the cerebellum. It controls most of the activities of the body, processing, integrating, and coordinating the information it receives from the sense organs, and making decisions as to the instructions sent to the rest of the body.
-            
-            The cerebrum is the largest part of the human brain. It is divided into two cerebral hemispheres. The cerebral cortex is an outer layer of grey matter, covering the core of white matter. The cortex is split into the neocortex and the much smaller allocortex. The neocortex is made up of six neuronal layers, while the allocortex has three or four.
-            
-            Each hemisphere is conventionally divided into four lobes – the frontal, temporal, parietal, and occipital lobes. The frontal lobe is associated with executive functions including self-control, planning, reasoning, and abstract thought, while the occipital lobe is dedicated to vision. Within each lobe, cortical areas are associated with specific functions, such as the sensory, motor and association regions.
-            
-            The cerebellum is divided into an anterior lobe, a posterior lobe, and the flocculonodular lobe. The anterior and posterior lobes are connected in the middle by the vermis. Compared to the cerebral cortex, the cerebellum has a much thinner outer cortex. The cerebellum's anterior and posterior lobes appear to play a role in the coordination and smoothing of complex motor movements, and the flocculonodular lobe in the maintenance of balance.
+            Once upon a time, there was a small forest where all the animals lived together as friends. The clever fox, the wise owl, and the playful rabbit were the best of friends. They would play games, find food, and help each other every day.
+
+            One sunny morning, the fox found a shiny round object near the river. It sparkled in the sunlight. "What could this be?" thought the fox. He decided to show it to his friends.
+
+            First, he went to the owl who lived in the tallest tree. "Owl, look what I found by the river!" said the fox. The owl adjusted her glasses and looked carefully. "That's a special stone that fell from the sky last night. It's called a star stone," said the owl.
+
+            Next, they both went to the rabbit's burrow. "Rabbit, come see what I found!" called the fox. The rabbit hopped out and stared at the stone with wide eyes. "It's so pretty!" she said, touching it gently.
+
+            The three friends decided to place the star stone in the center of the forest where all animals could enjoy its beauty. They dug a small hole and placed it carefully.
+
+            That night, something magical happened. The stone began to glow with a soft blue light! It lit up the entire forest, making it easier for all the nocturnal animals to see. The hedgehogs could find more bugs, the mice could gather more seeds, and the bats could fly without bumping into trees.
+
+            From that day on, the forest became known as the "Glowing Forest," and animals from far and wide would come to visit and see the magical star stone that the three friends had found.
+
+            The fox, owl, and rabbit were very proud of themselves for sharing their discovery with everyone instead of keeping it for themselves. They learned that sharing something special with others can bring joy to many.
         """.trimIndent(),
         questions = listOf(
             Question(
                 id = 1,
-                text = "What are the three main parts of the human brain?",
+                text = "Who were the three best friends in the forest?",
                 options = listOf(
-                    "Cerebrum, brainstem, and occipital lobe",
-                    "Cerebrum, brainstem, and cerebellum",
-                    "Neocortex, allocortex, and cerebellum",
-                    "Frontal lobe, temporal lobe, and parietal lobe"
+                    "Fox, bear, and rabbit",
+                    "Fox, owl, and rabbit",
+                    "Owl, rabbit, and squirrel",
+                    "Fox, owl, and hedgehog"
                 ),
                 correctAnswerIndex = 1
             ),
             Question(
                 id = 2,
-                text = "Which lobe of the brain is associated with vision?",
+                text = "What did the fox find near the river?",
                 options = listOf(
-                    "Frontal lobe",
-                    "Temporal lobe",
-                    "Parietal lobe",
-                    "Occipital lobe"
+                    "A fish",
+                    "A bird",
+                    "A star stone",
+                    "A toy"
                 ),
-                correctAnswerIndex = 3
+                correctAnswerIndex = 2
             ),
             Question(
                 id = 3,
-                text = "What is the function of the cerebellum?",
+                text = "What happened to the stone at night?",
                 options = listOf(
-                    "Processing visual information",
-                    "Controlling executive functions",
-                    "Coordinating complex motor movements and balance",
-                    "Processing auditory information"
+                    "It disappeared",
+                    "It turned into a star",
+                    "It began to glow blue",
+                    "It grew bigger"
+                ),
+                correctAnswerIndex = 2
+            ),
+            Question(
+                id = 4,
+                text = "What did the friends learn in the story?",
+                options = listOf(
+                    "Never trust strangers",
+                    "Always keep treasures hidden",
+                    "Sharing brings joy to many",
+                    "Forests are dangerous at night"
+                ),
+                correctAnswerIndex = 2
+            ),
+            Question(
+                id = 5,
+                text = "What was the forest called after they found the stone?",
+                options = listOf(
+                    "Starry Forest",
+                    "Blue Forest",
+                    "Glowing Forest",
+                    "Magic Forest"
                 ),
                 correctAnswerIndex = 2
             )
         )
     )
 
-    fun startCountdown() {
-        _uiState.value = ReadingTaskState.Countdown(3)
+    init {
+        // Just initialize the services without starting them
+        if (!motionDetectionService.isTracking()) {
+            motionDetectionService.resetTracking()
+        }
     }
 
-    fun startReading() {
+    fun startCountdown() {
+        _uiState.value = ReadingTaskState.Countdown(3)
+
+        super.startCountdown(3) {
+            startReading()
+        }
+    }
+
+    private fun startReading() {
+        // Start sensors
+        startSensors()
+
+        // Record start time
         readingStartTime = System.currentTimeMillis()
+
+        // Start main timer (unused in reading but needed for BaseAssessmentTaskViewModel)
+        startMainTimer()
+
+        // Start sensor update timer
+        startSensorUpdateTimer()
+
+        // Reset metrics
+        correctAnswers = 0
+        incorrectAnswers = 0
+        selectedAnswers.clear()
+
+        // Show reading passage
         _uiState.value = ReadingTaskState.Reading(passage)
     }
 
     fun finishReading() {
+        // Record end time
         readingEndTime = System.currentTimeMillis()
+
+        // Reset question index and selection
         _currentQuestionIndex.value = 0
         _selectedOptionIndex.value = null
+
+        // Move to questions
         _uiState.value = ReadingTaskState.Questions(
             question = passage.questions[0],
             currentIndex = 0,
@@ -99,12 +211,8 @@ class ReadingTaskViewModel : ViewModel() {
         val currentQuestion = passage.questions[_currentQuestionIndex.value]
         _selectedOptionIndex.value = optionIndex
 
-        // Record if answer is correct
-        if (optionIndex == currentQuestion.correctAnswerIndex) {
-            correctAnswers++
-        } else {
-            incorrectAnswers++
-        }
+        // Store the selected answer (can be changed later)
+        selectedAnswers[currentQuestion.id] = optionIndex
     }
 
     fun nextQuestion() {
@@ -113,17 +221,77 @@ class ReadingTaskViewModel : ViewModel() {
 
         if (nextIndex < passage.questions.size) {
             _currentQuestionIndex.value = nextIndex
+
+            // Restore previous answer if it exists
+            val nextQuestion = passage.questions[nextIndex]
+            _selectedOptionIndex.value = selectedAnswers[nextQuestion.id]
+
             _uiState.value = ReadingTaskState.Questions(
-                question = passage.questions[nextIndex],
+                question = nextQuestion,
                 currentIndex = nextIndex,
                 totalQuestions = passage.questions.size
             )
         } else {
-            completeTask()
+            // All questions answered, calculate results
+            calculateResults()
         }
     }
 
-    private fun completeTask() {
+    fun previousQuestion() {
+        if (_currentQuestionIndex.value > 0) {
+            val prevIndex = _currentQuestionIndex.value - 1
+            _currentQuestionIndex.value = prevIndex
+
+            // Restore previous answer if it exists
+            val prevQuestion = passage.questions[prevIndex]
+            _selectedOptionIndex.value = selectedAnswers[prevQuestion.id]
+
+            _uiState.value = ReadingTaskState.Questions(
+                question = prevQuestion,
+                currentIndex = prevIndex,
+                totalQuestions = passage.questions.size
+            )
+        }
+    }
+
+    private fun calculateResults() {
+        // Calculate correct/incorrect answers
+        correctAnswers = 0
+        incorrectAnswers = 0
+
+        passage.questions.forEach { question ->
+            val selectedOption = selectedAnswers[question.id]
+            if (selectedOption != null) {
+                if (selectedOption == question.correctAnswerIndex) {
+                    correctAnswers++
+                } else {
+                    incorrectAnswers++
+                }
+            } else {
+                // Count unanswered as incorrect
+                incorrectAnswers++
+            }
+        }
+
+        completeTask()
+    }
+
+    override fun startTask() {
+        // This is handled differently for reading task - called by startReading()
+    }
+
+    override fun completeTask() {
+        // Clean up timers
+        mainTimer?.cancel()
+        sensorUpdateTimer?.cancel()
+
+        // One final update of sensor metrics
+        updateSensorMetrics()
+
+        // Get final sensor metrics
+        val finalFaceMetrics = _faceMetrics.value
+        val finalMotionMetrics = _motionMetrics.value
+
         // Calculate reading time in seconds
         val readingTimeSeconds = ((readingEndTime - readingStartTime) / 1000).toInt()
 
@@ -143,61 +311,71 @@ class ReadingTaskViewModel : ViewModel() {
             0
         }
 
-        // ADHD probability calculation
-        // Lower reading speed and comprehension correlate with ADHD symptoms
-        val speedFactor = if (readingSpeed < 150) 40 else
-            if (readingSpeed < 200) 30 else
-                if (readingSpeed < 250) 20 else 10
+        // Stop tracking
+        if (motionDetectionService.isTracking()) {
+            motionDetectionService.stopTracking()
+        }
 
-        val comprehensionFactor = if (comprehensionScore < 50) 40 else
-            if (comprehensionScore < 70) 30 else
-                if (comprehensionScore < 85) 20 else 10
+        // Analyze ADHD indicators
+        val adhdAssessment = adhdAnalyzer.analyzePerformance(
+            correctResponses = correctAnswers,
+            incorrectResponses = incorrectAnswers,
+            missedResponses = 0, // Not applicable for reading
+            averageResponseTime = readingTimeSeconds * 1000 / totalQuestions, // Approximate time per question
+            responseTimeVariability = 0f, // Not tracked in reading task
+            faceMetrics = finalFaceMetrics,
+            motionMetrics = finalMotionMetrics,
+            durationSeconds = readingTimeSeconds
+        )
 
-        val readingTimeFactor = if (readingTimeSeconds > 120) 20 else
-            if (readingTimeSeconds > 90) 15 else
-                if (readingTimeSeconds > 60) 10 else 5
-
-        val adhdProbabilityScore = (speedFactor + comprehensionFactor + readingTimeFactor)
-            .coerceIn(0, 100)
-
-        val result = ReadingTaskResult(
+        // Create domain entity for storage in repository
+        val domainResult = ReadingTaskResult(
             readingTime = readingTimeSeconds,
             correctAnswers = correctAnswers,
             incorrectAnswers = incorrectAnswers,
             readingSpeed = readingSpeed,
             comprehensionScore = comprehensionScore,
-            adhdProbabilityScore = adhdProbabilityScore
+            adhdProbabilityScore = adhdAssessment.adhdProbabilityScore
         )
 
-        _uiState.value = ReadingTaskState.Completed(result)
+        // Save to repository
+        resultsRepository.saveReadingResult(domainResult)
+
+        // Create presentation model for UI (matching CPT format)
+        val uiResult = ReadingTaskResultUI(
+            readingTime = readingTimeSeconds,
+            correctAnswers = correctAnswers,
+            incorrectAnswers = incorrectAnswers,
+            readingSpeed = readingSpeed,
+            comprehensionScore = comprehensionScore,
+            faceMetrics = finalFaceMetrics,
+            motionMetrics = finalMotionMetrics,
+            adhdAssessment = adhdAssessment
+        )
+
+        // Update UI state with the presentation model
+        _uiState.value = ReadingTaskState.Completed(uiResult)
     }
 
-    fun onCountdownComplete() {
-        startReading()
+    fun processFaceImage(imageProxy: androidx.camera.core.ImageProxy) {
+        if (_uiState.value is ReadingTaskState.Reading || _uiState.value is ReadingTaskState.Questions) {
+            faceAnalysisService.processImage(imageProxy)
+        } else {
+            imageProxy.close()
+        }
     }
-}
 
-data class ReadingPassage(
-    val title: String,
-    val content: String,
-    val questions: List<Question>
-)
+    override fun onCleared() {
+        super.onCleared()
+    }
 
-data class Question(
-    val id: Int,
-    val text: String,
-    val options: List<String>,
-    val correctAnswerIndex: Int
-)
-
-sealed class ReadingTaskState {
-    object Instructions : ReadingTaskState()
-    data class Countdown(val count: Int) : ReadingTaskState()
-    data class Reading(val passage: ReadingPassage) : ReadingTaskState()
-    data class Questions(
-        val question: Question,
-        val currentIndex: Int,
-        val totalQuestions: Int
-    ) : ReadingTaskState()
-    data class Completed(val result: ReadingTaskResult) : ReadingTaskState()
+    class Factory(private val context: Context) : ViewModelProvider.Factory {
+        @Suppress("UNCHECKED_CAST")
+        override fun <T : androidx.lifecycle.ViewModel> create(modelClass: Class<T>): T {
+            if (modelClass.isAssignableFrom(ReadingTaskViewModel::class.java)) {
+                return ReadingTaskViewModel(context) as T
+            }
+            throw IllegalArgumentException("Unknown ViewModel class")
+        }
+    }
 }
