@@ -78,7 +78,6 @@ fun CPTTaskScreen(
                     "In this task, you will see letters appear on the screen one at a time.",
                     "Tap the screen whenever you see the letter X.",
                     "Try to respond as quickly and accurately as possible.",
-                    "Your face and movements will be analyzed to detect ADHD patterns.",
                     "This test will take 30 seconds to complete."
                 ),
                 buttonText = if (!cameraPermissionGranted) "Request Camera Permission" else "Start Task",

@@ -39,6 +39,7 @@ class WorkingMemoryTaskViewModel : ViewModel() {
     private var currentStimulus: String? = null
     private var isCurrentMatch = false
     private var hasResponded = false
+    private var trialCount = 0
 
     // Stimuli for the task (shapes represented as text)
     private val shapes = listOf("●", "■", "▲", "◆", "★", "✚")
@@ -81,6 +82,9 @@ class WorkingMemoryTaskViewModel : ViewModel() {
         responseTimes.clear()
         previousStimulus = null
         currentStimulus = null
+        trialCount = 0
+        isCurrentMatch = false
+        hasResponded = false
 
         // Reset motion tracking
         motionDetectionService.resetTracking()
@@ -114,6 +118,11 @@ class WorkingMemoryTaskViewModel : ViewModel() {
         // Cancel any existing stimulus timer
         stimulusTimer?.cancel()
 
+        // If we had a stimulus and it was a match but user didn't respond, count as missed
+        if (currentStimulus != null && isCurrentMatch && !hasResponded) {
+            missedResponses++
+        }
+
         // Wait before showing next stimulus (1-2 seconds)
         val delay = Random.nextInt(1000, 2001).toLong()
 
@@ -121,48 +130,44 @@ class WorkingMemoryTaskViewModel : ViewModel() {
             override fun onTick(millisUntilFinished: Long) {}
 
             override fun onFinish() {
-                // Update stimuli
+                // Update previous stimulus
                 previousStimulus = currentStimulus
 
-                // Determine if this should be a match (20% chance if not first stimulus)
-                val shouldBeMatch = previousStimulus != null && Random.nextDouble() < 0.2
+                // Generate the next stimulus
+                if (trialCount == 0 || Random.nextDouble() >= 0.3 || previousStimulus == null) {
+                    // Non-match case (first trial, 70% chance, or no previous stimulus)
 
-                if (shouldBeMatch) {
-                    // Match - use the same shape as previous
+                    // For first trial, just pick any stimulus
+                    if (previousStimulus == null) {
+                        currentStimulus = shapes.random()
+                    } else {
+                        // Pick a different stimulus than the previous one
+                        do {
+                            currentStimulus = shapes.random()
+                        } while (currentStimulus == previousStimulus)
+                    }
+                    isCurrentMatch = false
+                } else {
+                    // Match case (30% chance)
                     currentStimulus = previousStimulus
                     isCurrentMatch = true
-                } else {
-                    // Find a different shape than the previous
-                    var newStimulus: String
-                    do {
-                        newStimulus = shapes.random()
-                    } while (newStimulus == previousStimulus)
-
-                    currentStimulus = newStimulus
-                    isCurrentMatch = false
                 }
+
+                // Increment trial count
+                trialCount++
 
                 // Update UI
                 _stimulus.value = currentStimulus
-
-                // Reset response tracking
                 hasResponded = false
-
-                // Show the stimulus
                 stimulusShownTime = System.currentTimeMillis()
                 _stimulusVisible.value = true
 
-                // Set timer for missed response (2 seconds)
+                // Set timer for stimulus duration (2 seconds)
                 stimulusTimer = object : CountDownTimer(2000, 2000) {
                     override fun onTick(millisUntilFinished: Long) {}
 
                     override fun onFinish() {
-                        // If it was a match and no response, count as missed
-                        if (isCurrentMatch && !hasResponded) {
-                            missedResponses++
-                        }
-
-                        // Show next stimulus
+                        // Move to next stimulus
                         presentNextStimulus()
                     }
                 }.start()
@@ -172,7 +177,7 @@ class WorkingMemoryTaskViewModel : ViewModel() {
 
     fun handleResponse() {
         if (_uiState.value != WorkingMemoryTaskState.Running || !_stimulusVisible.value || hasResponded) {
-            return
+            return  // Ignore duplicate or invalid responses
         }
 
         hasResponded = true
@@ -185,11 +190,11 @@ class WorkingMemoryTaskViewModel : ViewModel() {
             correctResponses++
             responseTimes.add(responseTime)
         } else {
-            // Incorrect response - not a match
+            // Incorrect response - responded when not a match
             incorrectResponses++
         }
 
-        // Cancel the stimulus timer
+        // Cancel the stimulus timer to move on faster
         stimulusTimer?.cancel()
 
         // Present next stimulus
@@ -200,6 +205,11 @@ class WorkingMemoryTaskViewModel : ViewModel() {
         // Clean up timers
         mainTimer?.cancel()
         stimulusTimer?.cancel()
+
+        // Check for missed response on the final stimulus
+        if (currentStimulus != null && isCurrentMatch && !hasResponded) {
+            missedResponses++
+        }
 
         // Stop motion tracking and analyze results
         val motionResults = if (motionDetectionService.isTracking()) {
