@@ -1,27 +1,53 @@
 package com.example.recognicam.presentation.viewmodel
 
+import android.content.Context
 import android.os.CountDownTimer
-import androidx.lifecycle.ViewModel
-import com.example.recognicam.core.ServiceLocator
-import com.example.recognicam.domain.entity.WorkingMemoryTaskResult
+import androidx.lifecycle.ViewModelProvider
+import com.example.recognicam.core.base.BaseAssessmentTaskViewModel
+import com.example.recognicam.data.analysis.ADHDAnalyzer
+import com.example.recognicam.data.analysis.ADHDAssessmentResult
+import com.example.recognicam.data.sensor.FaceMetrics
+import com.example.recognicam.data.sensor.MotionMetrics
+import com.example.recognicam.domain.entity.WorkingMemoryTaskResult as DomainWorkingMemoryTaskResult
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlin.math.sqrt
 import kotlin.random.Random
 
-class WorkingMemoryTaskViewModel : ViewModel() {
+sealed class WorkingMemoryTaskState {
+    object Instructions : WorkingMemoryTaskState()
+    data class Countdown(val count: Int) : WorkingMemoryTaskState()
+    object Running : WorkingMemoryTaskState()
+    data class Completed(val result: WorkingMemoryTaskResultUI) : WorkingMemoryTaskState()
+}
 
-    private val resultsRepository = ServiceLocator.getResultsRepository()
-    private val motionDetectionService = ServiceLocator.getMotionDetectionService()
+// UI model for results (matching CPT format)
+data class WorkingMemoryTaskResultUI(
+    val correctResponses: Int,
+    val incorrectResponses: Int,
+    val missedResponses: Int,
+    val averageResponseTime: Int,
+    val responseTimeVariability: Float,
+    val accuracy: Int,
+    val memorySpan: Int = 1,
+    val responseTimesMs: List<Long>,
+    val faceMetrics: FaceMetrics,
+    val motionMetrics: MotionMetrics,
+    val adhdAssessment: ADHDAssessmentResult
+)
+
+class WorkingMemoryTaskViewModel(
+    private val context: Context
+) : BaseAssessmentTaskViewModel() {
+
+    private val adhdAnalyzer = ADHDAnalyzer()
 
     // Task UI state
     private val _uiState = MutableStateFlow<WorkingMemoryTaskState>(WorkingMemoryTaskState.Instructions)
     val uiState: StateFlow<WorkingMemoryTaskState> = _uiState.asStateFlow()
 
     // Task parameters
-    private val _timeRemaining = MutableStateFlow(40) // Default 40 seconds
-    val timeRemaining: StateFlow<Int> = _timeRemaining.asStateFlow()
-
     private val _stimulus = MutableStateFlow<String?>(null)
     val stimulus: StateFlow<String?> = _stimulus.asStateFlow()
 
@@ -44,37 +70,26 @@ class WorkingMemoryTaskViewModel : ViewModel() {
     // Stimuli for the task (shapes represented as text)
     private val shapes = listOf("●", "■", "▲", "◆", "★", "✚")
 
-    // Task parameters
-    private var taskDuration = 40 // seconds
-
     // Timers
-    private var mainTimer: CountDownTimer? = null
     private var stimulusTimer: CountDownTimer? = null
     private var stimulusShownTime = 0L
 
     init {
-        // Start tracking motion when ViewModel is created
+        // Just initialize the services without starting them
         if (!motionDetectionService.isTracking()) {
-            motionDetectionService.startTracking()
+            motionDetectionService.resetTracking()
         }
     }
 
     fun startCountdown() {
         _uiState.value = WorkingMemoryTaskState.Countdown(3)
 
-        object : CountDownTimer(3000, 1000) {
-            override fun onTick(millisUntilFinished: Long) {
-                val secondsLeft = millisUntilFinished / 1000 + 1
-                _uiState.value = WorkingMemoryTaskState.Countdown(secondsLeft.toInt())
-            }
-
-            override fun onFinish() {
-                startTask()
-            }
-        }.start()
+        super.startCountdown(3) {
+            startTask()
+        }
     }
 
-    private fun startTask() {
+    override fun startTask() {
         // Reset metrics
         correctResponses = 0
         incorrectResponses = 0
@@ -86,26 +101,17 @@ class WorkingMemoryTaskViewModel : ViewModel() {
         isCurrentMatch = false
         hasResponded = false
 
-        // Reset motion tracking
-        motionDetectionService.resetTracking()
-        if (!motionDetectionService.isTracking()) {
-            motionDetectionService.startTracking()
-        }
+        // Start sensors
+        startSensors()
 
         // Set up task state
         _uiState.value = WorkingMemoryTaskState.Running
-        _timeRemaining.value = taskDuration
 
         // Start main timer
-        mainTimer = object : CountDownTimer(taskDuration * 1000L, 1000) {
-            override fun onTick(millisUntilFinished: Long) {
-                _timeRemaining.value = (millisUntilFinished / 1000).toInt()
-            }
+        startMainTimer()
 
-            override fun onFinish() {
-                completeTask()
-            }
-        }.start()
+        // Start sensor update timer
+        startSensorUpdateTimer()
 
         // Present first stimulus
         presentNextStimulus()
@@ -201,22 +207,27 @@ class WorkingMemoryTaskViewModel : ViewModel() {
         presentNextStimulus()
     }
 
-    private fun completeTask() {
+    override fun completeTask() {
         // Clean up timers
         mainTimer?.cancel()
         stimulusTimer?.cancel()
+        sensorUpdateTimer?.cancel()
 
         // Check for missed response on the final stimulus
         if (currentStimulus != null && isCurrentMatch && !hasResponded) {
             missedResponses++
         }
 
-        // Stop motion tracking and analyze results
-        val motionResults = if (motionDetectionService.isTracking()) {
+        // One final update of sensor metrics
+        updateSensorMetrics()
+
+        // Get final sensor metrics
+        val finalFaceMetrics = _faceMetrics.value
+        val finalMotionMetrics = _motionMetrics.value
+
+        // Stop tracking
+        if (motionDetectionService.isTracking()) {
             motionDetectionService.stopTracking()
-            motionDetectionService.analyzeMotion()
-        } else {
-            null
         }
 
         // Calculate performance metrics
@@ -229,59 +240,80 @@ class WorkingMemoryTaskViewModel : ViewModel() {
             0
         }
 
-        // Calculate ADHD probability score
-        val accuracyFactor = when {
-            accuracy < 60 -> 40
-            accuracy < 75 -> 30
-            accuracy < 85 -> 20
-            else -> 10
+        // Calculate response time variability (standard deviation)
+        val responseTimeVariability = if (responseTimes.size > 1) {
+            val mean = responseTimes.average()
+            val variance = responseTimes.map { (it - mean) * (it - mean) }.sum() / responseTimes.size
+            sqrt(variance).toFloat()
+        } else {
+            0f
         }
 
-        val responseTimeFactor = when {
-            averageResponseTime > 600 -> 30
-            averageResponseTime > 500 -> 20
-            averageResponseTime > 400 -> 10
-            else -> 0
-        }
+        // Analyze ADHD indicators
+        val adhdAssessment = adhdAnalyzer.analyzePerformance(
+            correctResponses = correctResponses,
+            incorrectResponses = incorrectResponses,
+            missedResponses = missedResponses,
+            averageResponseTime = averageResponseTime,
+            responseTimeVariability = responseTimeVariability,
+            faceMetrics = finalFaceMetrics,
+            motionMetrics = finalMotionMetrics,
+            durationSeconds = taskDuration
+        )
 
-        val motionFactor = (motionResults?.fidgetingScore?.div(4) ?: 0).coerceAtMost(30)
-
-        val adhdProbabilityScore = (accuracyFactor + responseTimeFactor + motionFactor)
-            .coerceIn(0, 100)
-
-        val result = WorkingMemoryTaskResult(
+        // Create domain entity for storage in repository
+        val domainResult = DomainWorkingMemoryTaskResult(
             correctResponses = correctResponses,
             incorrectResponses = incorrectResponses,
             missedResponses = missedResponses,
             accuracy = accuracy,
             averageResponseTime = averageResponseTime,
             memorySpan = 1, // 1-back task
-            adhdProbabilityScore = adhdProbabilityScore
+            adhdProbabilityScore = adhdAssessment.adhdProbabilityScore
         )
 
-        // Save result
-        resultsRepository.saveWorkingMemoryResult(result)
+        // Save to repository
+        resultsRepository.saveWorkingMemoryResult(domainResult)
 
-        // Update UI state
-        _uiState.value = WorkingMemoryTaskState.Completed(result)
+        // Create presentation model for UI (matching CPT format)
+        val uiResult = WorkingMemoryTaskResultUI(
+            correctResponses = correctResponses,
+            incorrectResponses = incorrectResponses,
+            missedResponses = missedResponses,
+            accuracy = accuracy,
+            averageResponseTime = averageResponseTime,
+            responseTimeVariability = responseTimeVariability,
+            memorySpan = 1, // 1-back task
+            responseTimesMs = responseTimes,
+            faceMetrics = finalFaceMetrics,
+            motionMetrics = finalMotionMetrics,
+            adhdAssessment = adhdAssessment
+        )
+
+        // Update UI state with the presentation model
+        _uiState.value = WorkingMemoryTaskState.Completed(uiResult)
     }
 
-    fun setTaskDuration(seconds: Int) {
-        if (_uiState.value == WorkingMemoryTaskState.Instructions) {
-            taskDuration = seconds
+    fun processFaceImage(imageProxy: androidx.camera.core.ImageProxy) {
+        if (_uiState.value == WorkingMemoryTaskState.Running) {
+            faceAnalysisService.processImage(imageProxy)
+        } else {
+            imageProxy.close()
         }
     }
 
     override fun onCleared() {
         super.onCleared()
-        mainTimer?.cancel()
         stimulusTimer?.cancel()
     }
-}
 
-sealed class WorkingMemoryTaskState {
-    object Instructions : WorkingMemoryTaskState()
-    data class Countdown(val count: Int) : WorkingMemoryTaskState()
-    object Running : WorkingMemoryTaskState()
-    data class Completed(val result: WorkingMemoryTaskResult) : WorkingMemoryTaskState()
+    class Factory(private val context: Context) : ViewModelProvider.Factory {
+        @Suppress("UNCHECKED_CAST")
+        override fun <T : androidx.lifecycle.ViewModel> create(modelClass: Class<T>): T {
+            if (modelClass.isAssignableFrom(WorkingMemoryTaskViewModel::class.java)) {
+                return WorkingMemoryTaskViewModel(context) as T
+            }
+            throw IllegalArgumentException("Unknown ViewModel class")
+        }
+    }
 }

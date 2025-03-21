@@ -30,7 +30,7 @@ fun AnimatedStimulus(
             .size(180.dp)
             .alpha(alpha)
             .clip(RoundedCornerShape(12.dp))
-            .background(MaterialTheme.colorScheme.surface)
+            .background(MaterialTheme.colorScheme.primary)
             .then(modifier),
         contentAlignment = Alignment.Center
     ) {
