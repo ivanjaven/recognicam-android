@@ -1,27 +1,57 @@
 package com.example.recognicam.presentation.viewmodel
 
+import android.content.Context
 import android.os.CountDownTimer
-import androidx.lifecycle.ViewModel
-import com.example.recognicam.core.ServiceLocator
-import com.example.recognicam.domain.entity.GoNoGoTaskResult
+import androidx.lifecycle.ViewModelProvider
+import com.example.recognicam.core.base.BaseAssessmentTaskViewModel
+import com.example.recognicam.data.analysis.ADHDAnalyzer
+import com.example.recognicam.data.analysis.ADHDAssessmentResult
+import com.example.recognicam.data.sensor.FaceMetrics
+import com.example.recognicam.data.sensor.MotionMetrics
+import com.example.recognicam.domain.entity.GoNoGoTaskResult as DomainGoNoGoTaskResult
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlin.math.sqrt
 import kotlin.random.Random
 
-class GoNoGoTaskViewModel : ViewModel() {
+sealed class GoNoGoTaskState {
+    object Instructions : GoNoGoTaskState()
+    data class Countdown(val count: Int) : GoNoGoTaskState()
+    object Running : GoNoGoTaskState()
+    data class Completed(val result: GoNoGoTaskResultUI) : GoNoGoTaskState()
+}
 
-    private val resultsRepository = ServiceLocator.getResultsRepository()
-    private val motionDetectionService = ServiceLocator.getMotionDetectionService()
+enum class StimulusType {
+    GO, NO_GO
+}
+
+// UI model for results (matching CPT format)
+data class GoNoGoTaskResultUI(
+    val correctGo: Int,
+    val correctNoGo: Int,
+    val missedGo: Int,
+    val incorrectNoGo: Int,
+    val averageResponseTime: Int,
+    val accuracy: Int,
+    val responseTimesMs: List<Long>,
+    val responseTimeVariability: Float,
+    val faceMetrics: FaceMetrics,
+    val motionMetrics: MotionMetrics,
+    val adhdAssessment: ADHDAssessmentResult
+)
+
+class GoNoGoTaskViewModel(
+    private val context: Context
+) : BaseAssessmentTaskViewModel() {
+
+    private val adhdAnalyzer = ADHDAnalyzer()
 
     // Task UI state
     private val _uiState = MutableStateFlow<GoNoGoTaskState>(GoNoGoTaskState.Instructions)
     val uiState: StateFlow<GoNoGoTaskState> = _uiState.asStateFlow()
 
     // Task parameters
-    private val _timeRemaining = MutableStateFlow(40) // Default 40 seconds
-    val timeRemaining: StateFlow<Int> = _timeRemaining.asStateFlow()
-
     private val _stimulusType = MutableStateFlow<StimulusType?>(null)
     val stimulusType: StateFlow<StimulusType?> = _stimulusType.asStateFlow()
 
@@ -34,38 +64,27 @@ class GoNoGoTaskViewModel : ViewModel() {
     private var missedGo = 0
     private var incorrectNoGo = 0
     private val goResponseTimes = mutableListOf<Long>()
-
-    // Task parameters
-    private var taskDuration = 40 // seconds
-
-    // Timers
-    private var mainTimer: CountDownTimer? = null
-    private var stimulusTimer: CountDownTimer? = null
     private var stimulusShownTime = 0L
 
+    // Task parameters
+    private var stimulusTimer: CountDownTimer? = null
+
     init {
-        // Start tracking motion when ViewModel is created
+        // Just initialize the services without starting them
         if (!motionDetectionService.isTracking()) {
-            motionDetectionService.startTracking()
+            motionDetectionService.resetTracking()
         }
     }
 
     fun startCountdown() {
         _uiState.value = GoNoGoTaskState.Countdown(3)
 
-        object : CountDownTimer(3000, 1000) {
-            override fun onTick(millisUntilFinished: Long) {
-                val secondsLeft = millisUntilFinished / 1000 + 1
-                _uiState.value = GoNoGoTaskState.Countdown(secondsLeft.toInt())
-            }
-
-            override fun onFinish() {
-                startTask()
-            }
-        }.start()
+        super.startCountdown(3) {
+            startTask()
+        }
     }
 
-    private fun startTask() {
+    override fun startTask() {
         // Reset metrics
         correctGo = 0
         correctNoGo = 0
@@ -73,26 +92,17 @@ class GoNoGoTaskViewModel : ViewModel() {
         incorrectNoGo = 0
         goResponseTimes.clear()
 
-        // Reset motion tracking
-        motionDetectionService.resetTracking()
-        if (!motionDetectionService.isTracking()) {
-            motionDetectionService.startTracking()
-        }
+        // Start sensors
+        startSensors()
 
         // Set up task state
         _uiState.value = GoNoGoTaskState.Running
-        _timeRemaining.value = taskDuration
 
         // Start main timer
-        mainTimer = object : CountDownTimer(taskDuration * 1000L, 1000) {
-            override fun onTick(millisUntilFinished: Long) {
-                _timeRemaining.value = (millisUntilFinished / 1000).toInt()
-            }
+        startMainTimer()
 
-            override fun onFinish() {
-                completeTask()
-            }
-        }.start()
+        // Start sensor update timer
+        startSensorUpdateTimer()
 
         // Present first stimulus
         presentNextStimulus()
@@ -106,8 +116,8 @@ class GoNoGoTaskViewModel : ViewModel() {
         // Cancel any existing stimulus timer
         stimulusTimer?.cancel()
 
-        // Random delay between stimuli (1000-2500ms)
-        val delay = Random.nextInt(1000, 2501).toLong()
+        // Random delay between stimuli (1000-2000ms)
+        val delay = Random.nextInt(1000, 2001).toLong()
 
         stimulusTimer = object : CountDownTimer(delay, delay) {
             override fun onTick(millisUntilFinished: Long) {}
@@ -156,13 +166,15 @@ class GoNoGoTaskViewModel : ViewModel() {
         // Cancel the stimulus timer
         stimulusTimer?.cancel()
 
+        // Calculate response time
+        val responseTime = System.currentTimeMillis() - stimulusShownTime
+
         when (_stimulusType.value) {
             StimulusType.GO -> {
                 // Correct Go response
                 correctGo++
 
                 // Record response time
-                val responseTime = System.currentTimeMillis() - stimulusShownTime
                 goResponseTimes.add(responseTime)
             }
             StimulusType.NO_GO -> {
@@ -182,17 +194,22 @@ class GoNoGoTaskViewModel : ViewModel() {
         presentNextStimulus()
     }
 
-    private fun completeTask() {
+    override fun completeTask() {
         // Clean up timers
         mainTimer?.cancel()
         stimulusTimer?.cancel()
+        sensorUpdateTimer?.cancel()
 
-        // Stop motion tracking and analyze results
-        val motionResults = if (motionDetectionService.isTracking()) {
+        // One final update of sensor metrics
+        updateSensorMetrics()
+
+        // Get final sensor metrics
+        val finalFaceMetrics = _faceMetrics.value
+        val finalMotionMetrics = _motionMetrics.value
+
+        // Stop tracking
+        if (motionDetectionService.isTracking()) {
             motionDetectionService.stopTracking()
-            motionDetectionService.analyzeMotion()
-        } else {
-            null
         }
 
         // Calculate performance metrics
@@ -209,56 +226,80 @@ class GoNoGoTaskViewModel : ViewModel() {
             0
         }
 
-        // Calculate ADHD probability score
-        val responseTimeFactor = if (averageResponseTime > 500) 30 else
-            if (averageResponseTime > 400) 20 else
-                if (averageResponseTime > 300) 10 else 0
+        // Calculate response time variability (standard deviation)
+        val responseTimeVariability = if (goResponseTimes.size > 1) {
+            val mean = goResponseTimes.average()
+            val variance = goResponseTimes.map { (it - mean) * (it - mean) }.sum() / goResponseTimes.size
+            sqrt(variance).toFloat()
+        } else {
+            0f
+        }
 
-        val inhibitionErrorFactor = (incorrectNoGo * 5).coerceAtMost(40)
-        val missedGoFactor = (missedGo * 3).coerceAtMost(30)
-        val motionFactor = (motionResults?.fidgetingScore?.div(5) ?: 0).coerceAtMost(20)
+        // Analyze ADHD indicators
+        val adhdAssessment = adhdAnalyzer.analyzePerformance(
+            correctResponses = correctGo,
+            incorrectResponses = incorrectNoGo,
+            missedResponses = missedGo,
+            averageResponseTime = averageResponseTime,
+            responseTimeVariability = responseTimeVariability,
+            faceMetrics = finalFaceMetrics,
+            motionMetrics = finalMotionMetrics,
+            durationSeconds = taskDuration
+        )
 
-        val adhdProbabilityScore = (responseTimeFactor + inhibitionErrorFactor +
-                missedGoFactor + motionFactor)
-            .coerceIn(0, 100)
-
-        val result = GoNoGoTaskResult(
+        // Create domain entity for storage in repository
+        val domainResult = DomainGoNoGoTaskResult(
             correctGo = correctGo,
             correctNoGo = correctNoGo,
             missedGo = missedGo,
             incorrectNoGo = incorrectNoGo,
             accuracy = accuracy,
             averageResponseTime = averageResponseTime,
-            adhdProbabilityScore = adhdProbabilityScore
+            adhdProbabilityScore = adhdAssessment.adhdProbabilityScore
         )
 
-        // Save result
-        resultsRepository.saveGoNoGoResult(result)
+        // Save to repository
+        resultsRepository.saveGoNoGoResult(domainResult)
 
-        // Update UI state
-        _uiState.value = GoNoGoTaskState.Completed(result)
+        // Create presentation model for UI (matching CPT format)
+        val uiResult = GoNoGoTaskResultUI(
+            correctGo = correctGo,
+            correctNoGo = correctNoGo,
+            missedGo = missedGo,
+            incorrectNoGo = incorrectNoGo,
+            averageResponseTime = averageResponseTime,
+            accuracy = accuracy,
+            responseTimesMs = goResponseTimes,
+            responseTimeVariability = responseTimeVariability,
+            faceMetrics = finalFaceMetrics,
+            motionMetrics = finalMotionMetrics,
+            adhdAssessment = adhdAssessment
+        )
+
+        // Update UI state with the presentation model
+        _uiState.value = GoNoGoTaskState.Completed(uiResult)
     }
 
-    fun setTaskDuration(seconds: Int) {
-        if (_uiState.value == GoNoGoTaskState.Instructions) {
-            taskDuration = seconds
+    fun processFaceImage(imageProxy: androidx.camera.core.ImageProxy) {
+        if (_uiState.value == GoNoGoTaskState.Running) {
+            faceAnalysisService.processImage(imageProxy)
+        } else {
+            imageProxy.close()
         }
     }
 
     override fun onCleared() {
         super.onCleared()
-        mainTimer?.cancel()
         stimulusTimer?.cancel()
     }
-}
 
-enum class StimulusType {
-    GO, NO_GO
-}
-
-sealed class GoNoGoTaskState {
-    object Instructions : GoNoGoTaskState()
-    data class Countdown(val count: Int) : GoNoGoTaskState()
-    object Running : GoNoGoTaskState()
-    data class Completed(val result: GoNoGoTaskResult) : GoNoGoTaskState()
+    class Factory(private val context: Context) : ViewModelProvider.Factory {
+        @Suppress("UNCHECKED_CAST")
+        override fun <T : androidx.lifecycle.ViewModel> create(modelClass: Class<T>): T {
+            if (modelClass.isAssignableFrom(GoNoGoTaskViewModel::class.java)) {
+                return GoNoGoTaskViewModel(context) as T
+            }
+            throw IllegalArgumentException("Unknown ViewModel class")
+        }
+    }
 }
