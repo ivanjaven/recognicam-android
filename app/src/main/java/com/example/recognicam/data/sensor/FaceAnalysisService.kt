@@ -87,9 +87,16 @@ class FaceAnalysisService {
     private var expressionChanges = 0
     private var expressionIntensities = mutableListOf<Float>()
 
+    // Enhanced emotion tracking
+    private var emotionHistory = mutableListOf<String>()
+    private var mouthOpennessFactor = 0f
+    private var lastMouthOpennessTime = 0L
+    private var yawnDetected = false
+    private var confusionDetected = false
+
     // Limit events to avoid skewed metrics
     private val MAX_DISTRACTIBILITY_EVENTS = 40
-    private val MAX_EMOTION_CHANGES = 25
+    private val MAX_EMOTION_CHANGES = 40  // Increased from 25 to better capture variations
     private val MAX_FACIAL_MOVEMENT = 60
 
     // Improved attention assessment
@@ -143,6 +150,11 @@ class FaceAnalysisService {
         expressionIntensities.clear()
         attentionQuality.clear()
         framesSinceLastFacialMovement = 0
+        emotionHistory.clear()
+        mouthOpennessFactor = 0f
+        lastMouthOpennessTime = 0L
+        yawnDetected = false
+        confusionDetected = false
     }
 
     fun reset() {
@@ -268,7 +280,7 @@ class FaceAnalysisService {
         updateBlinkDetection(leftEyeOpenProb, rightEyeOpenProb)
 
         // Enhanced emotion detection
-        updateEmotionDetection(face.smilingProbability ?: 0f)
+        updateEmotionDetection(face)
     }
 
     private fun calculateHeadMovement(
@@ -414,7 +426,13 @@ class FaceAnalysisService {
         lastRightEyeOpen = rightEyeOpen
     }
 
-    private fun updateEmotionDetection(smileProbability: Float) {
+    private fun updateEmotionDetection(face: Face) {
+        val now = System.currentTimeMillis()
+        val smileProbability = face.smilingProbability ?: 0f
+        val leftEyeOpenProb = face.leftEyeOpenProbability ?: 0.5f
+        val rightEyeOpenProb = face.rightEyeOpenProbability ?: 0.5f
+        val avgEyeOpenness = (leftEyeOpenProb + rightEyeOpenProb) / 2f
+
         // Track emotional intensity (using smile probability as proxy)
         emotionSamples++
         emotionIntensitySum += smileProbability
@@ -427,17 +445,19 @@ class FaceAnalysisService {
             expressionIntensities.removeFirst()
         }
 
+        // IMPROVED: Lower threshold for emotion delta detection (0.35f -> 0.2f)
         val emotionDelta = abs(smileProbability - lastEmotionIntensity)
-        if (emotionDelta > 0.35f) {
+        if (emotionDelta > 0.2f) {
             // Only increment if below maximum
             if (emotionChanges < MAX_EMOTION_CHANGES) {
                 emotionChanges++
             }
 
             // Track expressions changes (large changes add to distractibility)
-            if (emotionDelta > 0.5f && System.currentTimeMillis() - lastExpressionTime > 1000) {
+            // IMPROVED: Lower threshold and time requirement (0.5f -> 0.3f, 1000ms -> 800ms)
+            if (emotionDelta > 0.3f && now - lastExpressionTime > 800) {
                 expressionChanges++
-                lastExpressionTime = System.currentTimeMillis()
+                lastExpressionTime = now
 
                 // Calculate expression variability (std deviation-like)
                 if (expressionIntensities.size > 5) {
@@ -450,30 +470,90 @@ class FaceAnalysisService {
 
         lastEmotionIntensity = smileProbability
 
-        // Enhanced emotion classifications
+        // IMPROVED: Detect yawning using eye openness and head position
+        val isYawning = detectYawning(face, avgEyeOpenness)
+        if (isYawning && !yawnDetected) {
+            yawnDetected = true
+            if (emotionChanges < MAX_EMOTION_CHANGES && now - lastEmotionChangeTime > 800) {
+                emotionChanges += 2 // Count yawning as a significant emotion change
+                lastEmotionChangeTime = now
+            }
+        } else if (!isYawning && yawnDetected) {
+            yawnDetected = false
+        }
+
+        // IMPROVED: Detect confusion using head tilt and eye openness
+        val isConfused = detectConfusion(face, avgEyeOpenness)
+        if (isConfused && !confusionDetected) {
+            confusionDetected = true
+            if (emotionChanges < MAX_EMOTION_CHANGES && now - lastEmotionChangeTime > 800) {
+                emotionChanges++
+                lastEmotionChangeTime = now
+            }
+        } else if (!isConfused && confusionDetected) {
+            confusionDetected = false
+        }
+
+        // IMPROVED: Enhanced emotion classifications with more states
         val currentEmotion = when {
+            isYawning -> "yawning"
+            isConfused -> "confused"
             smileProbability > 0.8f -> "very happy"
             smileProbability > 0.5f -> "happy"
             smileProbability > 0.2f -> "slight smile"
+            avgEyeOpenness < 0.3f -> "tired"
+            face.headEulerAngleX > 15f && smileProbability < 0.2f -> "downcast"
+            face.headEulerAngleX < -10f -> "looking up"
+            abs(face.headEulerAngleZ) > 15f -> "tilted head"
             else -> "neutral"
         }
 
+        // IMPROVED: Reduced time threshold for emotion changes (1500ms -> 800ms)
         if (currentEmotion != lastEmotion) {
-            // Don't count every emotion change, use time threshold
-            if (System.currentTimeMillis() - lastEmotionChangeTime > 1500) {
+            emotionHistory.add(currentEmotion)
+            if (emotionHistory.size > 10) emotionHistory.removeAt(0)
+
+            // Don't count every emotion change, use shorter time threshold
+            if (now - lastEmotionChangeTime > 800) {
                 // Only increment if below maximum
                 if (emotionChanges < MAX_EMOTION_CHANGES) {
                     emotionChanges++
                 }
                 lastEmotion = currentEmotion
-                lastEmotionChangeTime = System.currentTimeMillis()
+                lastEmotionChangeTime = now
             }
 
             // Emotional instability can be a sign of ADHD (with limits)
-            if (emotionDelta > 0.6f && distractibilityEvents < MAX_DISTRACTIBILITY_EVENTS) {
+            // IMPROVED: Lower threshold for distractibility events (0.6f -> 0.4f)
+            if (emotionDelta > 0.4f && distractibilityEvents < MAX_DISTRACTIBILITY_EVENTS) {
                 distractibilityEvents++
             }
         }
+    }
+
+    // ADDED: Detect yawning based on available face features
+    private fun detectYawning(face: Face, avgEyeOpenness: Float): Boolean {
+        // Yawning often involves:
+        // 1. Partially closed eyes
+        // 2. Head tilted slightly back
+        // 3. Low smile probability
+        val smileProb = face.smilingProbability ?: 0f
+        val headTiltBack = face.headEulerAngleX < -5f  // looking up slightly
+
+        // Basic yawn heuristic - works with available ML Kit face data
+        return avgEyeOpenness < 0.4f && headTiltBack && smileProb < 0.2f
+    }
+
+    // ADDED: Detect confusion based on available face features
+    private fun detectConfusion(face: Face, avgEyeOpenness: Float): Boolean {
+        // Confusion often involves:
+        // 1. Head tilt (roll axis)
+        // 2. Wider eyes
+        // 3. Low smile probability
+        val headTilt = abs(face.headEulerAngleZ) > 12f  // head tilted sideways
+        val smileProb = face.smilingProbability ?: 0f
+
+        return headTilt && avgEyeOpenness > 0.6f && smileProb < 0.3f
     }
 
     private fun updateMetrics() {
@@ -505,11 +585,17 @@ class FaceAnalysisService {
             (baseScore * 0.7f).toInt().coerceIn(0, 100)
         } else 0
 
-        // Calculate emotion variability
+        // Calculate emotion variability - IMPROVED calculation
         val emotionVariabilityScore = if (emotionSamples > 0) {
+            // Base calculation from expression changes
             val baseVariability = ((emotionChanges * 100f) / emotionSamples.coerceAtLeast(1))
+            // Add weight from expression variability
             val adjustedVariability = baseVariability + (expressionVariability * 50f)
-            (adjustedVariability * 0.8f).toInt().coerceIn(0, 100)
+            // Add unique emotion types factor
+            val uniqueEmotionsFactor = emotionHistory.distinct().size * 5f
+
+            // Combine factors with weights
+            ((adjustedVariability * 0.7f) + (uniqueEmotionsFactor * 0.3f)).toInt().coerceIn(0, 100)
         } else 0
 
         // Calculate attention lapse frequency (per minute)
@@ -564,7 +650,8 @@ class FaceAnalysisService {
         updateMetrics()
         println("Final face metrics - Look aways: ${_faceMetrics.value.lookAwayCount}, " +
                 "Sustained attention: ${_faceMetrics.value.sustainedAttentionScore}%, " +
-                "Distractibility: ${_faceMetrics.value.distractibilityIndex}%")
+                "Distractibility: ${_faceMetrics.value.distractibilityIndex}%, " +
+                "Emotion changes: ${_faceMetrics.value.emotionChanges}")
         return _faceMetrics.value
     }
 }
