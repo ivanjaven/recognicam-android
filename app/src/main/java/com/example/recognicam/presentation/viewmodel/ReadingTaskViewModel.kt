@@ -176,9 +176,6 @@ class ReadingTaskViewModel(
         // Record start time
         readingStartTime = System.currentTimeMillis()
 
-        // Start main timer (unused in reading but needed for BaseAssessmentTaskViewModel)
-        startMainTimer()
-
         // Start sensor update timer
         startSensorUpdateTimer()
 
@@ -189,6 +186,8 @@ class ReadingTaskViewModel(
 
         // Show reading passage
         _uiState.value = ReadingTaskState.Reading(passage)
+
+        // DO NOT call startMainTimer() here as it would trigger automatic completion
     }
 
     fun finishReading() {
