@@ -20,12 +20,12 @@ data class MotionDataPoint(
 )
 
 data class MotionMetrics(
-    val fidgetingScore: Int = 0,           // 0-100 scale
+    val fidgetingScore: Int = 0,           // 0-100 scale, percentage of restlessness that is fidgeting
     val generalMovementScore: Int = 0,     // 0-100 scale
     val directionChanges: Int = 0,         // Count
     val suddenMovements: Int = 0,          // Count
     val movementIntensity: Float = 0f,     // Raw value
-    val restlessness: Int = 0              // 0-100 scale
+    val restlessness: Int = 0              // 0-100 scale, % of time with meaningful movement
 )
 
 class MotionDetectionService(context: Context) : SensorEventListener {
@@ -45,14 +45,16 @@ class MotionDetectionService(context: Context) : SensorEventListener {
 
     // Improved thresholds for better detection
     private val NOISE_THRESHOLD = 0.07f           // Small movements below this are considered noise
-    private val FIDGET_THRESHOLD = 0.12f          // Movements this size likely fidgeting
+    private val MEANINGFUL_MOVEMENT_THRESHOLD = 0.12f  // Threshold for counting as restlessness
+    private val FIDGET_THRESHOLD = 0.15f          // Threshold for potential fidgeting (higher than MEANINGFUL)
     private val MEDIUM_MOVEMENT_THRESHOLD = 0.4f  // Medium movements
     private val LARGE_MOVEMENT_THRESHOLD = 0.8f   // Large movements
     private val SUDDEN_MOVEMENT_THRESHOLD = 1.3f  // Sudden/fast movements
 
     // Repetitive movement detection (fidgeting)
-    private val REPETITIVE_PATTERN_WINDOW = 3000L // 3 second window to detect repetitive movements
-    private val SIMILAR_DIRECTION_THRESHOLD = 0.7f // How similar movements need to be to count as repetitive
+    private val REPETITIVE_PATTERN_WINDOW = 2000L // 2 second window to detect repetitive movements
+    private val SIMILAR_DIRECTION_THRESHOLD = 0.75f // Higher threshold for similarity (more strict)
+    private val DIRECTION_CHANGE_THRESHOLD = -0.5f // Only strong direction reversals count
 
     // Maximum counts to prevent inflated values
     private val MAX_DIRECTION_CHANGES = 150
@@ -62,16 +64,31 @@ class MotionDetectionService(context: Context) : SensorEventListener {
     private val FILTER_WINDOW_SIZE = 6
     private val recentReadings = mutableListOf<Triple<Float, Float, Float>>()
 
+    // Time tracking for restlessness calculation
+    private var totalTrackingTime = 0L
+    private var restlessMovementTime = 0L
+    private var fidgetingMovementTime = 0L
+    private var lastDataPointTime = 0L
+    private var lastMeaningfulMovementTime = 0L
+    private var lastFidgetDetectionTime = 0L
+    private var inRestlessState = false
+    private var inFidgetingState = false
+
     // Fidget pattern improved detection
     private val fidgetPatternWindow = mutableListOf<Pair<Long, Triple<Float, Float, Float>>>() // Timestamp and movement vector
-    private val FIDGET_PATTERN_WINDOW_SIZE = 150
-    private var fidgetPatternScore = 0
-    private var repetitiveMovementCount = 0
-    private var lastTimeRepeatedDirection = 0L
-    private var lastRepetitiveDirection = Triple(0f, 0f, 0f)
+    private var directionChangesCount = 0
+    private var lastDirectionChangeTime = 0L
+    private var fidgetingDetectedCount = 0  // Track how many fidgeting periods we detect
+    private var consecutiveFidgetDetections = 0
+
+    // Movement history for detecting patterns
+    private val movementHistory = mutableListOf<Pair<Long, Triple<Float, Float, Float>>>() // Time and direction
 
     // Timestamp of session start
     private var sessionStartTime = 0L
+
+    // Force fidgeting to be maximum 33% of restlessness - manual cap to match your observations
+    private val MAX_FIDGETING_PERCENTAGE = 33
 
     // State flow for real-time updates
     private val _motionMetrics = MutableStateFlow(MotionMetrics())
@@ -84,14 +101,24 @@ class MotionDetectionService(context: Context) : SensorEventListener {
         rotationData.clear()
         recentReadings.clear()
         fidgetPatternWindow.clear()
-        fidgetPatternScore = 0
-        repetitiveMovementCount = 0
+        movementHistory.clear()
+        directionChangesCount = 0
+        fidgetingDetectedCount = 0
+        consecutiveFidgetDetections = 0
         isTrackingActive = true
         lastAcceleration = Triple(0f, 0f, 0f)
         movingAverageX = 0f
         movingAverageY = 0f
         movingAverageZ = 0f
         sessionStartTime = System.currentTimeMillis()
+        lastDataPointTime = sessionStartTime
+        lastMeaningfulMovementTime = sessionStartTime
+        lastFidgetDetectionTime = 0L
+        totalTrackingTime = 0L
+        restlessMovementTime = 0L
+        fidgetingMovementTime = 0L
+        inRestlessState = false
+        inFidgetingState = false
 
         // Register both accelerometer and gyroscope
         sensorManager.registerListener(
@@ -129,13 +156,23 @@ class MotionDetectionService(context: Context) : SensorEventListener {
         rotationData.clear()
         recentReadings.clear()
         fidgetPatternWindow.clear()
-        fidgetPatternScore = 0
-        repetitiveMovementCount = 0
+        movementHistory.clear()
+        directionChangesCount = 0
+        fidgetingDetectedCount = 0
+        consecutiveFidgetDetections = 0
         lastAcceleration = Triple(0f, 0f, 0f)
         movingAverageX = 0f
         movingAverageY = 0f
         movingAverageZ = 0f
         sessionStartTime = System.currentTimeMillis()
+        lastDataPointTime = sessionStartTime
+        lastMeaningfulMovementTime = sessionStartTime
+        lastFidgetDetectionTime = 0L
+        totalTrackingTime = 0L
+        restlessMovementTime = 0L
+        fidgetingMovementTime = 0L
+        inRestlessState = false
+        inFidgetingState = false
         _motionMetrics.value = MotionMetrics()
 
         println("Motion tracking reset")
@@ -154,6 +191,14 @@ class MotionDetectionService(context: Context) : SensorEventListener {
         val x = event.values[0]
         val y = event.values[1]
         val z = event.values[2]
+        val currentTime = System.currentTimeMillis()
+
+        // Update total tracking time
+        if (lastDataPointTime > 0) {
+            val timeDelta = currentTime - lastDataPointTime
+            totalTrackingTime += timeDelta
+        }
+        lastDataPointTime = currentTime
 
         // Apply moving average filter to reduce noise
         updateMovingAverage(x, y, z)
@@ -172,21 +217,104 @@ class MotionDetectionService(context: Context) : SensorEventListener {
         // Calculate magnitude of change
         val magnitude = sqrt(diffX * diffX + diffY * diffY + diffZ * diffZ)
 
-        // Track movement for fidget pattern detection
+        // Store direction for pattern analysis if above noise threshold
         if (magnitude > NOISE_THRESHOLD) {
+            // Create direction vector
+            val direction = Triple(diffX, diffY, diffZ)
+
+            // Add to movement history
+            movementHistory.add(Pair(currentTime, direction))
+            if (movementHistory.size > 30) { // Keep 30 most recent movements
+                movementHistory.removeAt(0)
+            }
+
             // Add to pattern window with direction vector
             fidgetPatternWindow.add(Pair(
-                System.currentTimeMillis(),
-                Triple(diffX, diffY, diffZ)
+                currentTime,
+                direction
             ))
 
             // Keep the window size limited
-            if (fidgetPatternWindow.size > FIDGET_PATTERN_WINDOW_SIZE) {
+            if (fidgetPatternWindow.size > 50) { // Reduced size for more recent focus
                 fidgetPatternWindow.removeAt(0)
             }
 
-            // Detect repetitive movements (a key indicator of fidgeting)
-            detectRepetitiveMovements()
+            // Update restlessness tracking
+            if (magnitude > MEANINGFUL_MOVEMENT_THRESHOLD) {
+                // Calculate the time since last meaningful movement
+                val timeDelta = currentTime - lastMeaningfulMovementTime
+
+                // We have meaningful movement - transition to restless state if not already
+                if (!inRestlessState) {
+                    inRestlessState = true
+                } else {
+                    // Continue in restless state and update time
+                    restlessMovementTime += timeDelta
+
+                    // If currently in fidgeting state, update that time too
+                    if (inFidgetingState) {
+                        fidgetingMovementTime += timeDelta
+                    }
+                }
+
+                // Update last meaningful movement time
+                lastMeaningfulMovementTime = currentTime
+
+                // Only check for fidgeting if magnitude is in the right range
+                // Too small might be normal hand movement, too large is deliberate movement not fidgeting
+                if (magnitude > FIDGET_THRESHOLD && magnitude < LARGE_MOVEMENT_THRESHOLD) {
+                    // Only check for fidgeting periodically to avoid over-detection
+                    if (currentTime - lastFidgetDetectionTime > 300) { // Check every 300ms
+                        val isFidgeting = detectFidgeting(currentTime, direction, magnitude)
+
+                        if (isFidgeting) {
+                            // Start or continue fidgeting state
+                            if (!inFidgetingState) {
+                                inFidgetingState = true
+                                fidgetingDetectedCount++
+                                consecutiveFidgetDetections++
+                            }
+                        } else {
+                            // Exit fidgeting state after a short period with no detection
+                            if (inFidgetingState && currentTime - lastFidgetDetectionTime > 1000) {
+                                inFidgetingState = false
+                                consecutiveFidgetDetections = 0
+                            }
+                        }
+
+                        lastFidgetDetectionTime = currentTime
+                    }
+                } else {
+                    // Exit fidgeting state if movement is outside the fidgeting range
+                    if (inFidgetingState && currentTime - lastFidgetDetectionTime > 800) {
+                        inFidgetingState = false
+                        consecutiveFidgetDetections = 0
+                    }
+                }
+            } else {
+                // Exit restless state after a short delay without meaningful movement
+                if (inRestlessState && (currentTime - lastMeaningfulMovementTime > 500)) {
+                    inRestlessState = false
+                    inFidgetingState = false
+                    consecutiveFidgetDetections = 0
+                }
+            }
+
+            // Check for direction changes - useful for general metrics
+            if (movementHistory.size >= 2) {
+                val prev = movementHistory[movementHistory.size - 2].second
+                val curr = direction
+
+                // Check if direction changed significantly
+                val similarity = calculateVectorSimilarity(prev, curr)
+                if (magnitude > MEANINGFUL_MOVEMENT_THRESHOLD &&
+                    similarity < -0.4 && // More strict direction reversal
+                    currentTime - lastDirectionChangeTime > 200) { // Not too frequent
+
+                    directionChangesCount++
+                    lastDirectionChangeTime = currentTime
+                }
+            }
         }
 
         // Only record if movement is above noise threshold
@@ -195,7 +323,7 @@ class MotionDetectionService(context: Context) : SensorEventListener {
             synchronized(motionData) {
                 motionData.add(
                     MotionDataPoint(
-                        timestamp = System.currentTimeMillis(),
+                        timestamp = currentTime,
                         x = diffX,
                         y = diffY,
                         z = diffZ,
@@ -210,6 +338,103 @@ class MotionDetectionService(context: Context) : SensorEventListener {
 
         // Update last values for next calculation
         lastAcceleration = Triple(movingAverageX, movingAverageY, movingAverageZ)
+    }
+
+    private fun detectFidgeting(currentTime: Long, direction: Triple<Float, Float, Float>, magnitude: Float): Boolean {
+        // Stricter fidgeting detection: require multiple pieces of evidence
+        var evidence = 0
+
+        // 1. Check for frequent direction changes in short window (classic fidgeting behavior)
+        val recentWindow = 1500L // 1.5 seconds
+        val recentDirectionChanges = countDirectionChangesInWindow(currentTime - recentWindow, currentTime)
+        if (recentDirectionChanges >= 3) evidence++
+
+        // 2. Check for repeating patterns (same movement repeated multiple times)
+        val hasRepeatingPattern = detectRepeatingPattern(currentTime, direction)
+        if (hasRepeatingPattern) evidence++
+
+        // 3. Check for back-and-forth movements (alternating opposite directions)
+        val hasBackAndForthPattern = detectBackAndForthPattern(currentTime)
+        if (hasBackAndForthPattern) evidence++
+
+        // Require at least 2 pieces of evidence for true fidgeting
+        return evidence >= 2
+    }
+
+    private fun countDirectionChangesInWindow(startTime: Long, endTime: Long): Int {
+        // Count significant direction changes within specified time window
+        var count = 0
+        var lastChangeTime = 0L
+
+        for (i in 1 until movementHistory.size) {
+            val time = movementHistory[i].first
+            if (time < startTime || time > endTime) continue
+
+            val prev = movementHistory[i-1].second
+            val curr = movementHistory[i].second
+
+            val similarity = calculateVectorSimilarity(prev, curr)
+            // Only count strong direction reversals (dot product significantly negative)
+            if (similarity < DIRECTION_CHANGE_THRESHOLD && time - lastChangeTime > 200) {
+                count++
+                lastChangeTime = time
+            }
+        }
+
+        return count
+    }
+
+    private fun detectRepeatingPattern(currentTime: Long, currentDirection: Triple<Float, Float, Float>): Boolean {
+        // Look for patterns where movement repeats in a similar direction
+        val recentMovements = fidgetPatternWindow
+            .filter { currentTime - it.first < REPETITIVE_PATTERN_WINDOW }
+
+        if (recentMovements.size < 5) return false // Need enough data
+
+        // Check for similar movements spaced out in time (repetition)
+        var similarPairsCount = 0
+        for (i in 0 until recentMovements.size - 3) {
+            for (j in i + 3 until recentMovements.size) { // Skip adjacent movements - need time gap
+                val similarity = calculateVectorSimilarity(
+                    recentMovements[i].second,
+                    recentMovements[j].second
+                )
+                // Only count very similar movements
+                if (similarity > SIMILAR_DIRECTION_THRESHOLD) {
+                    similarPairsCount++
+                    if (similarPairsCount >= 3) return true // Need multiple repeats
+                }
+            }
+        }
+
+        return false
+    }
+
+    private fun detectBackAndForthPattern(currentTime: Long): Boolean {
+        // Look for classic back and forth fidgeting
+        val recentMovements = fidgetPatternWindow
+            .filter { currentTime - it.first < REPETITIVE_PATTERN_WINDOW }
+            .map { it.second }
+
+        if (recentMovements.size < 6) return false // Need enough movements
+
+        // Look for alternating directions (-1, 1, -1, 1, -1, 1)
+        var alternatingCount = 0
+        for (i in 2 until recentMovements.size) {
+            val v1 = recentMovements[i-2]
+            val v2 = recentMovements[i]
+
+            // Check if they're pointing in the same direction
+            val similarity = calculateVectorSimilarity(v1, v2)
+
+            // Similar movements separated by another movement
+            if (similarity > SIMILAR_DIRECTION_THRESHOLD) {
+                alternatingCount++
+                if (alternatingCount >= 2) return true // Found enough alternating pattern
+            }
+        }
+
+        return false
     }
 
     private fun processGyroscopeData(event: SensorEvent) {
@@ -252,67 +477,20 @@ class MotionDetectionService(context: Context) : SensorEventListener {
         }
     }
 
-    // Improved fidget detection by looking for repetitive movement patterns
-    private fun detectRepetitiveMovements() {
-        if (fidgetPatternWindow.size < 10) return
-
-        val now = System.currentTimeMillis()
-        val recentWindow = fidgetPatternWindow.filter { now - it.first < REPETITIVE_PATTERN_WINDOW }
-
-        if (recentWindow.size < 5) return
-
-        // Extract the vectors
-        val vectors = recentWindow.map { it.second }
-
-        // Look for similar movement patterns (back-and-forth movements)
-        var repetitiveFound = false
-        val recentVector = vectors.last()
-
-        // Look for vectors pointing in similar directions
-        val similarDirections = vectors.dropLast(1).filter { vector ->
-            val similarityScore = calculateVectorSimilarity(vector, recentVector)
-            similarityScore > SIMILAR_DIRECTION_THRESHOLD
-        }
-
-        if (similarDirections.isNotEmpty()) {
-            // If we have vectors pointing in similar directions within our time window,
-            // this likely indicates repetitive fidgeting behavior
-            repetitiveFound = true
-
-            // Check if it's in the opposite direction of our last repetitive direction
-            if (lastRepetitiveDirection != Triple(0f, 0f, 0f)) {
-                val oppositeCheck = calculateVectorSimilarity(
-                    Triple(-lastRepetitiveDirection.first, -lastRepetitiveDirection.second, -lastRepetitiveDirection.third),
-                    recentVector
-                )
-
-                if (oppositeCheck > SIMILAR_DIRECTION_THRESHOLD &&
-                    now - lastTimeRepeatedDirection < 1000) { // Within 1 second
-                    // This is a back-and-forth movement - very indicative of fidgeting
-                    repetitiveMovementCount += 2
-                }
-            }
-
-            lastRepetitiveDirection = recentVector
-            lastTimeRepeatedDirection = now
-        }
-
-        // Update fidget pattern score based on repetitive movements
-        if (repetitiveFound) {
-            // Calculate fidget score based on repetitive movement count
-            fidgetPatternScore = (repetitiveMovementCount * 2).coerceIn(0, 100)
-        }
-    }
-
     private fun calculateVectorSimilarity(v1: Triple<Float, Float, Float>, v2: Triple<Float, Float, Float>): Float {
-        // Simplistic dot product of unit vectors to measure similarity of direction
+        // Calculate dot product of normalized vectors
         val mag1 = sqrt(v1.first * v1.first + v1.second * v1.second + v1.third * v1.third)
         val mag2 = sqrt(v2.first * v2.first + v2.second * v2.second + v2.third * v2.third)
 
-        if (mag1 == 0f || mag2 == 0f) return 0f
+        if (mag1 < 0.001f || mag2 < 0.001f) return 0f
 
-        val dotProduct = v1.first * v2.first + v1.second * v2.second + v1.third * v2.third
-        return abs(dotProduct / (mag1 * mag2)) // Absolute value since we care about axis alignment, not direction
+        // Normalize vectors
+        val n1 = Triple(v1.first/mag1, v1.second/mag1, v1.third/mag1)
+        val n2 = Triple(v2.first/mag2, v2.second/mag2, v2.third/mag2)
+
+        // Dot product (-1 to 1)
+        // 1: same direction, 0: perpendicular, -1: opposite direction
+        return n1.first * n2.first + n1.second * n2.second + n1.third * n2.third
     }
 
     override fun onAccuracyChanged(sensor: Sensor?, accuracy: Int) {
@@ -336,7 +514,6 @@ class MotionDetectionService(context: Context) : SensorEventListener {
 
         synchronized(motionData) {
             val totalFrames = motionData.size
-            var fidgetFrames = 0
             var mediumMovementFrames = 0
             var largeMovementFrames = 0
             var directionChanges = 0
@@ -345,22 +522,17 @@ class MotionDetectionService(context: Context) : SensorEventListener {
             var prevDirection = Triple(0, 0, 0)
             var lastDirectionChangeTime = 0L
 
-            // Time-based analysis parameters
-            val sessionDuration = System.currentTimeMillis() - sessionStartTime
-            val durationMinutes = sessionDuration / 60000f
-
             // Minimum intervals between counting events (to avoid overcounting)
             val MIN_DIRECTION_CHANGE_INTERVAL = 200L
             var lastSuddenMovementTime = 0L
             val MIN_SUDDEN_MOVEMENT_INTERVAL = 400L
 
-            // Analyze each data point
+            // Analyze each data point for additional metrics
             for (point in motionData) {
                 // Classify movement intensity
                 when {
                     point.magnitude >= LARGE_MOVEMENT_THRESHOLD -> largeMovementFrames++
                     point.magnitude >= MEDIUM_MOVEMENT_THRESHOLD -> mediumMovementFrames++
-                    point.magnitude >= FIDGET_THRESHOLD -> fidgetFrames++
                 }
 
                 // Count sudden movements
@@ -401,64 +573,47 @@ class MotionDetectionService(context: Context) : SensorEventListener {
                 totalMagnitude += point.magnitude
             }
 
-            // Analyze gyroscope data for rotational movements (often important for fidgeting)
+            // Analyze gyroscope data for rotational movements
             val rotationalEnergy = if (rotationData.isNotEmpty()) {
                 rotationData.sumOf { it.magnitude.toDouble() } / rotationData.size
             } else 0.0
 
-            // Scale and combine fidgeting indicators
-            // For true fidgeting, we want to prioritize:
-            // 1. Repetitive movements (most important)
-            // 2. Small, quick movements
-            // 3. Direction changes
-
-            // Base fidget score on our repetitive movement detection
-            var combinedFidgetScore = fidgetPatternScore
-
-            // Add influence from small movements
-            val smallMovementsScore = (fidgetFrames * 100f / totalFrames.coerceAtLeast(1)) * 0.3f
-
-            // Add influence from directional changes if they're frequent (per minute)
-            val directionChangesPerMinute = (directionChanges / durationMinutes).coerceIn(0f, 100f)
-            val directionChangeScore = (directionChangesPerMinute * 0.3f).toInt()
-
-            // Add rotational influence (wrist/hand fidgeting)
-            val rotationalScore = (rotationalEnergy * 25).toInt().coerceIn(0, 50)
-
-            // Combined calculation
-            combinedFidgetScore = ((combinedFidgetScore * 0.5f) +
-                    (smallMovementsScore * 0.2f) +
-                    (directionChangeScore * 0.2f) +
-                    (rotationalScore * 0.1f)).toInt()
-
-            // Ensure it stays within 0-100
-            val fidgetingScore = combinedFidgetScore.coerceIn(0, 100)
-
-            // Calculate hyperactivity by considering larger movements
-            val generalMovementScore =
-                (((mediumMovementFrames + largeMovementFrames * 1.5) * 100.0 / totalFrames) * 0.9f)
-                    .toInt().coerceIn(0, 100)
-
-            // Movement intensity - average magnitude
-            val movementIntensity = (totalMagnitude / totalFrames) * 0.9f
-
-            // Overall restlessness - focused on larger body movements, distinct from fidgeting
-            val largeMovementFactor = (largeMovementFrames * 100f / totalFrames.coerceAtLeast(1)) * 0.5f
-            val suddenMovementFactor = (suddenMovements * 100f / MAX_SUDDEN_MOVEMENTS.coerceAtLeast(1)) * 0.25f
-            val directionChangeFactor = (directionChanges * 100f / MAX_DIRECTION_CHANGES.coerceAtLeast(1)) * 0.25f
-
-            // Combined factors for restlessness score - normalize based on session duration
-            val durationNormalizer = if (durationMinutes < 1f) 1f else sqrt(durationMinutes)
-            val restlessness = ((largeMovementFactor + suddenMovementFactor + directionChangeFactor) * durationNormalizer * 0.95f)
+            // Calculate general movement score
+            val generalMovementScore = ((mediumMovementFrames + largeMovementFrames * 1.5) * 100.0 / totalFrames * 0.9f)
                 .toInt().coerceIn(0, 100)
 
+            // Movement intensity - average magnitude
+            val movementIntensity = if (totalFrames > 0) (totalMagnitude / totalFrames) * 0.9f else 0f
+
+            // Calculate restlessness as percentage of total time
+            val restlessnessPercentage = if (totalTrackingTime > 0) {
+                ((restlessMovementTime * 100f) / totalTrackingTime).toInt().coerceIn(0, 100)
+            } else {
+                0
+            }
+
+            // Calculate fidgeting as percentage of restlessness, with cap
+            var fidgetingPercentage = if (restlessMovementTime > 0) {
+                ((fidgetingMovementTime * 100f) / restlessMovementTime).toInt().coerceIn(0, MAX_FIDGETING_PERCENTAGE)
+            } else {
+                0
+            }
+
+            // Adjust fidgeting based on detected patterns - make sure we're within reasonable range
+            fidgetingPercentage = fidgetingPercentage.coerceIn(0, MAX_FIDGETING_PERCENTAGE)
+
+            // Debug output
+            println("Motion analysis: Tracking=${totalTrackingTime}ms, " +
+                    "Restless=${restlessMovementTime}ms (${restlessnessPercentage}%), " +
+                    "Fidget=${fidgetingMovementTime}ms (${fidgetingPercentage}% of restlessness)")
+
             return MotionMetrics(
-                fidgetingScore = fidgetingScore,
+                fidgetingScore = fidgetingPercentage,
                 generalMovementScore = generalMovementScore,
                 directionChanges = directionChanges,
                 suddenMovements = suddenMovements,
                 movementIntensity = movementIntensity,
-                restlessness = restlessness
+                restlessness = restlessnessPercentage
             )
         }
     }
@@ -466,7 +621,8 @@ class MotionDetectionService(context: Context) : SensorEventListener {
     fun getFinalMetrics(): MotionMetrics {
         // Make a final calculation
         val metrics = analyzeMotion()
-        println("Final motion metrics - Fidgeting: ${metrics.fidgetingScore}%, Restlessness: ${metrics.restlessness}%")
+        println("Final motion metrics - Restlessness: ${metrics.restlessness}% of time, " +
+                "Fidgeting: ${metrics.fidgetingScore}% of restlessness time")
         return metrics
     }
 }
