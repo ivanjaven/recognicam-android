@@ -3,6 +3,7 @@ package com.example.recognicam.data.analysis
 import com.example.recognicam.data.sensor.FaceMetrics
 import com.example.recognicam.data.sensor.MotionMetrics
 import kotlin.math.min
+import kotlin.math.sqrt
 
 data class ADHDAssessmentResult(
     val adhdProbabilityScore: Int, // 0-100
@@ -44,15 +45,15 @@ class ADHDAnalyzer {
             0
         }
 
-        // Response time factors - normalized to 0-100 scale for consistency
+        // Response time factors - moderately adjusted
         val responseTimeFactor = when {
             averageResponseTime > 800 -> 100
-            averageResponseTime > 700 -> 85
-            averageResponseTime > 600 -> 70
-            averageResponseTime > 500 -> 55
-            averageResponseTime > 400 -> 40
-            averageResponseTime > 300 -> 25
-            else -> 10
+            averageResponseTime > 700 -> 88  // Was 85
+            averageResponseTime > 600 -> 75  // Was 70
+            averageResponseTime > 500 -> 60  // Was 55
+            averageResponseTime > 400 -> 45  // Was 40
+            averageResponseTime > 300 -> 30  // Was 25
+            else -> 12                       // Was 10
         }
 
         markers.add(BehavioralMarker(
@@ -63,15 +64,15 @@ class ADHDAnalyzer {
             description = "Average time to respond to target stimuli. Longer times may indicate processing delays."
         ))
 
-        // Response time variability - normalized to 0-100 scale
+        // Response time variability - moderately adjusted
         val normalizedVariability = (responseTimeVariability / 3).coerceIn(0f, 100f)
         val variabilityFactor = when {
             normalizedVariability > 80 -> 100
-            normalizedVariability > 65 -> 80
-            normalizedVariability > 50 -> 60
-            normalizedVariability > 35 -> 40
-            normalizedVariability > 20 -> 20
-            else -> 10
+            normalizedVariability > 65 -> 82  // Was 80
+            normalizedVariability > 50 -> 65  // Was 60
+            normalizedVariability > 35 -> 45  // Was 40
+            normalizedVariability > 20 -> 25  // Was 20
+            else -> 12                        // Was 10
         }
 
         markers.add(BehavioralMarker(
@@ -82,14 +83,14 @@ class ADHDAnalyzer {
             description = "Consistency of response timing. High variability is a key ADHD indicator."
         ))
 
-        // Accuracy factors - already on 0-100 scale
+        // Accuracy factors - moderately adjusted
         val accuracyFactor = when {
             accuracy < 50 -> 100
-            accuracy < 65 -> 80
-            accuracy < 75 -> 60
-            accuracy < 85 -> 40
-            accuracy < 95 -> 20
-            else -> 10
+            accuracy < 65 -> 82   // Was 80
+            accuracy < 75 -> 65   // Was 60
+            accuracy < 85 -> 45   // Was 40
+            accuracy < 95 -> 25   // Was 20
+            else -> 12            // Was 10
         }
 
         markers.add(BehavioralMarker(
@@ -100,18 +101,18 @@ class ADHDAnalyzer {
             description = "Percentage of correct responses. Lower accuracy may indicate attention difficulties."
         ))
 
-        // Missed responses - normalize to 0-100 scale
+        // Missed responses - moderately adjusted
         val missedResponseRate = if (totalResponses > 0) {
             (missedResponses * 100) / totalResponses
         } else 0
 
         val missedResponseFactor = when {
             missedResponseRate > 25 -> 100
-            missedResponseRate > 20 -> 80
-            missedResponseRate > 15 -> 60
-            missedResponseRate > 10 -> 40
-            missedResponseRate > 5 -> 20
-            else -> 10
+            missedResponseRate > 20 -> 82  // Was 80
+            missedResponseRate > 15 -> 65  // Was 60
+            missedResponseRate > 10 -> 45  // Was 40
+            missedResponseRate > 5 -> 25   // Was 20
+            else -> 12                     // Was 10
         }
 
         markers.add(BehavioralMarker(
@@ -125,15 +126,15 @@ class ADHDAnalyzer {
         // ===== Face metrics =====
         val minuteMultiplier = 60f / durationSeconds
 
-        // Look away count - normalized to per-minute rate
+        // Look away count - moderately adjusted
         val lookAwayRate = faceMetrics.lookAwayCount * minuteMultiplier
         val lookAwayFactor = when {
             lookAwayRate > 12 -> 100
-            lookAwayRate > 9 -> 80
-            lookAwayRate > 6 -> 60
-            lookAwayRate > 3 -> 40
-            lookAwayRate > 1 -> 20
-            else -> 10
+            lookAwayRate > 9 -> 82    // Was 80
+            lookAwayRate > 6 -> 65    // Was 60
+            lookAwayRate > 3 -> 45    // Was 40
+            lookAwayRate > 1 -> 25    // Was 20
+            else -> 12                // Was 10
         }
 
         markers.add(BehavioralMarker(
@@ -149,11 +150,11 @@ class ADHDAnalyzer {
         val invertedAttentionScore = 100 - faceMetrics.sustainedAttentionScore
         val sustainedAttentionFactor = when {
             invertedAttentionScore > 80 -> 100
-            invertedAttentionScore > 65 -> 80
-            invertedAttentionScore > 50 -> 60
-            invertedAttentionScore > 35 -> 40
-            invertedAttentionScore > 20 -> 20
-            else -> 10
+            invertedAttentionScore > 65 -> 82  // Was 80
+            invertedAttentionScore > 50 -> 65  // Was 60
+            invertedAttentionScore > 35 -> 45  // Was 40
+            invertedAttentionScore > 20 -> 25  // Was 20
+            else -> 12                         // Was 10
         }
 
         markers.add(BehavioralMarker(
@@ -166,15 +167,15 @@ class ADHDAnalyzer {
             description = "Ability to maintain focus over time. Lower scores indicate difficulty maintaining attention."
         ))
 
-        // Look away duration - normalize to 0-100
+        // Look away duration - moderately adjusted
         val normalizedLookAwayDuration = (faceMetrics.averageLookAwayDuration / 50).coerceIn(0f, 100f)
         val lookAwayDurationFactor = when {
             normalizedLookAwayDuration > 80 -> 100
-            normalizedLookAwayDuration > 65 -> 80
-            normalizedLookAwayDuration > 50 -> 60
-            normalizedLookAwayDuration > 35 -> 40
-            normalizedLookAwayDuration > 20 -> 20
-            else -> 10
+            normalizedLookAwayDuration > 65 -> 82  // Was 80
+            normalizedLookAwayDuration > 50 -> 65  // Was 60
+            normalizedLookAwayDuration > 35 -> 45  // Was 40
+            normalizedLookAwayDuration > 20 -> 25  // Was 20
+            else -> 12                             // Was 10
         }
 
         markers.add(BehavioralMarker(
@@ -187,15 +188,15 @@ class ADHDAnalyzer {
             description = "How long attention typically stays away from task when distracted."
         ))
 
-        // Attention lapse frequency - normalize to 0-100
+        // Attention lapse frequency - moderately adjusted
         val normalizedAttentionLapses = (faceMetrics.attentionLapseFrequency * 10).coerceIn(0f, 100f)
         val attentionLapseFactor = when {
             normalizedAttentionLapses > 80 -> 100
-            normalizedAttentionLapses > 65 -> 80
-            normalizedAttentionLapses > 50 -> 60
-            normalizedAttentionLapses > 35 -> 40
-            normalizedAttentionLapses > 20 -> 20
-            else -> 10
+            normalizedAttentionLapses > 65 -> 82  // Was 80
+            normalizedAttentionLapses > 50 -> 65  // Was 60
+            normalizedAttentionLapses > 35 -> 45  // Was 40
+            normalizedAttentionLapses > 20 -> 25  // Was 20
+            else -> 12                            // Was 10
         }
 
         markers.add(BehavioralMarker(
@@ -208,14 +209,14 @@ class ADHDAnalyzer {
             description = "Moments when attention completely breaks from the task."
         ))
 
-        // Distractibility index - already on 0-100 scale
+        // Distractibility index - moderately adjusted
         val distractibilityFactor = when {
             faceMetrics.distractibilityIndex > 80 -> 100
-            faceMetrics.distractibilityIndex > 65 -> 80
-            faceMetrics.distractibilityIndex > 50 -> 60
-            faceMetrics.distractibilityIndex > 35 -> 40
-            faceMetrics.distractibilityIndex > 20 -> 20
-            else -> 10
+            faceMetrics.distractibilityIndex > 65 -> 82  // Was 80
+            faceMetrics.distractibilityIndex > 50 -> 65  // Was 60
+            faceMetrics.distractibilityIndex > 35 -> 45  // Was 40
+            faceMetrics.distractibilityIndex > 20 -> 25  // Was 20
+            else -> 12                                   // Was 10
         }
 
         markers.add(BehavioralMarker(
@@ -228,15 +229,15 @@ class ADHDAnalyzer {
             description = "Overall measure of how easily distracted. Some distractibility is normal."
         ))
 
-        // Blink rate - normalize to 0-100
+        // Blink rate - moderately adjusted
         val normalizedBlinkRate = (faceMetrics.blinkRate / 0.8f).coerceIn(0f, 100f)
         val blinkRateFactor = when {
-            normalizedBlinkRate > 80 -> 60  // High blink rate is moderately associated with ADHD
-            normalizedBlinkRate > 65 -> 50
-            normalizedBlinkRate > 50 -> 40
-            normalizedBlinkRate > 35 -> 30
-            normalizedBlinkRate > 20 -> 20
-            else -> 10
+            normalizedBlinkRate > 80 -> 65  // Was 60 - Slight increase for high blink rate
+            normalizedBlinkRate > 65 -> 55  // Was 50
+            normalizedBlinkRate > 50 -> 42  // Was 40
+            normalizedBlinkRate > 35 -> 32  // Was 30
+            normalizedBlinkRate > 20 -> 22  // Was 20
+            else -> 12                      // Was 10
         }
 
         markers.add(BehavioralMarker(
@@ -251,11 +252,11 @@ class ADHDAnalyzer {
         // For face visibility, lower values mean more problems (scale is reversed)
         val invertedFaceVisibility = 100 - faceMetrics.faceVisiblePercentage
         val faceVisibilityFactor = when {
-            invertedFaceVisibility > 40 -> 80  // Very low face visibility is problematic
-            invertedFaceVisibility > 30 -> 60
-            invertedFaceVisibility > 20 -> 40
-            invertedFaceVisibility > 10 -> 20
-            else -> 10
+            invertedFaceVisibility > 40 -> 85  // Was 80 - Slight increase
+            invertedFaceVisibility > 30 -> 65  // Was 60
+            invertedFaceVisibility > 20 -> 45  // Was 40
+            invertedFaceVisibility > 10 -> 25  // Was 20
+            else -> 12                         // Was 10
         }
 
         markers.add(BehavioralMarker(
@@ -266,14 +267,14 @@ class ADHDAnalyzer {
             description = "Percentage of time the face was visible to the camera."
         ))
 
-        // Facial movement - already on 0-100 scale
+        // Facial movement - moderately adjusted
         val facialMovementFactor = when {
-            faceMetrics.facialMovementScore > 80 -> 80
-            faceMetrics.facialMovementScore > 65 -> 70
-            faceMetrics.facialMovementScore > 50 -> 50
-            faceMetrics.facialMovementScore > 35 -> 30
-            faceMetrics.facialMovementScore > 20 -> 20
-            else -> 10
+            faceMetrics.facialMovementScore > 80 -> 85  // Was 80
+            faceMetrics.facialMovementScore > 65 -> 75  // Was 70
+            faceMetrics.facialMovementScore > 50 -> 55  // Was 50
+            faceMetrics.facialMovementScore > 35 -> 35  // Was 30
+            faceMetrics.facialMovementScore > 20 -> 22  // Was 20
+            else -> 12                                 // Was 10
         }
 
         markers.add(BehavioralMarker(
@@ -286,15 +287,15 @@ class ADHDAnalyzer {
             description = "Amount of facial movement during task. Some movement is completely normal."
         ))
 
-        // Emotion changes - normalize to 0-100
+        // Emotion changes - moderately adjusted
         val normalizedEmotionChanges = (faceMetrics.emotionChanges * minuteMultiplier).coerceIn(0f, 25f) * 4
         val emotionChangeFactor = when {
-            normalizedEmotionChanges > 80 -> 70
-            normalizedEmotionChanges > 65 -> 60
-            normalizedEmotionChanges > 50 -> 45
-            normalizedEmotionChanges > 35 -> 30
-            normalizedEmotionChanges > 20 -> 20
-            else -> 10
+            normalizedEmotionChanges > 80 -> 75  // Was 70
+            normalizedEmotionChanges > 65 -> 65  // Was 60
+            normalizedEmotionChanges > 50 -> 52  // Was 45
+            normalizedEmotionChanges > 35 -> 38  // Was 30
+            normalizedEmotionChanges > 20 -> 25  // Was 20
+            else -> 12                           // Was 10
         }
 
         markers.add(BehavioralMarker(
@@ -305,14 +306,14 @@ class ADHDAnalyzer {
             description = "Frequency of emotional expression changes. Rapid changes can indicate impulsivity."
         ))
 
-        // Emotion variability - already on 0-100 scale
+        // Emotion variability - moderately adjusted
         val emotionVariabilityFactor = when {
-            faceMetrics.emotionVariabilityScore > 80 -> 70
-            faceMetrics.emotionVariabilityScore > 65 -> 60
-            faceMetrics.emotionVariabilityScore > 50 -> 45
-            faceMetrics.emotionVariabilityScore > 35 -> 30
-            faceMetrics.emotionVariabilityScore > 20 -> 20
-            else -> 10
+            faceMetrics.emotionVariabilityScore > 80 -> 75  // Was 70
+            faceMetrics.emotionVariabilityScore > 65 -> 65  // Was 60
+            faceMetrics.emotionVariabilityScore > 50 -> 52  // Was 45
+            faceMetrics.emotionVariabilityScore > 35 -> 38  // Was 30
+            faceMetrics.emotionVariabilityScore > 20 -> 25  // Was 20
+            else -> 12                                     // Was 10
         }
 
         markers.add(BehavioralMarker(
@@ -326,14 +327,14 @@ class ADHDAnalyzer {
         ))
 
         // ===== Motion metrics =====
-        // Fidgeting score - already on 0-100 scale
+        // Fidgeting score - moderately adjusted
         val fidgetingFactor = when {
             motionMetrics.fidgetingScore > 80 -> 100
-            motionMetrics.fidgetingScore > 65 -> 80
-            motionMetrics.fidgetingScore > 50 -> 60
-            motionMetrics.fidgetingScore > 35 -> 40
-            motionMetrics.fidgetingScore > 20 -> 20
-            else -> 10
+            motionMetrics.fidgetingScore > 65 -> 82  // Was 80
+            motionMetrics.fidgetingScore > 50 -> 65  // Was 60
+            motionMetrics.fidgetingScore > 35 -> 45  // Was 40
+            motionMetrics.fidgetingScore > 20 -> 25  // Was 20
+            else -> 12                               // Was 10
         }
 
         markers.add(BehavioralMarker(
@@ -344,15 +345,15 @@ class ADHDAnalyzer {
             description = "Small repeated movements. Some fidgeting is normal and not concerning."
         ))
 
-        // Direction changes - normalize to 0-100
+        // Direction changes - moderately adjusted
         val normalizedDirectionChanges = ((motionMetrics.directionChanges * minuteMultiplier) / 1.5f).coerceIn(0f, 100f)
         val directionChangeFactor = when {
-            normalizedDirectionChanges > 80 -> 80
-            normalizedDirectionChanges > 65 -> 70
-            normalizedDirectionChanges > 50 -> 50
-            normalizedDirectionChanges > 35 -> 35
-            normalizedDirectionChanges > 20 -> 20
-            else -> 10
+            normalizedDirectionChanges > 80 -> 85  // Was 80
+            normalizedDirectionChanges > 65 -> 75  // Was 70
+            normalizedDirectionChanges > 50 -> 55  // Was 50
+            normalizedDirectionChanges > 35 -> 40  // Was 35
+            normalizedDirectionChanges > 20 -> 25  // Was 20
+            else -> 12                             // Was 10
         }
 
         markers.add(BehavioralMarker(
@@ -363,15 +364,15 @@ class ADHDAnalyzer {
             description = "How often movement direction changes. Rapid shifts can indicate restlessness."
         ))
 
-        // Sudden movements - normalize to 0-100
+        // Sudden movements - moderately adjusted
         val normalizedSuddenMovements = (motionMetrics.suddenMovements * minuteMultiplier).coerceIn(0f, 30f) * 3.33f
         val suddenMovementFactor = when {
-            normalizedSuddenMovements > 80 -> 80
-            normalizedSuddenMovements > 65 -> 65
-            normalizedSuddenMovements > 50 -> 50
-            normalizedSuddenMovements > 35 -> 35
-            normalizedSuddenMovements > 20 -> 20
-            else -> 10
+            normalizedSuddenMovements > 80 -> 85  // Was 80
+            normalizedSuddenMovements > 65 -> 70  // Was 65
+            normalizedSuddenMovements > 50 -> 55  // Was 50
+            normalizedSuddenMovements > 35 -> 40  // Was 35
+            normalizedSuddenMovements > 20 -> 25  // Was 20
+            else -> 12                            // Was 10
         }
 
         markers.add(BehavioralMarker(
@@ -382,14 +383,14 @@ class ADHDAnalyzer {
             description = "Quick, unexpected movements. Can indicate impulsivity if frequent."
         ))
 
-        // Restlessness - already on 0-100 scale
+        // Restlessness - moderately adjusted
         val restlessnessFactor = when {
             motionMetrics.restlessness > 80 -> 100
-            motionMetrics.restlessness > 65 -> 80
-            motionMetrics.restlessness > 50 -> 60
-            motionMetrics.restlessness > 35 -> 40
-            motionMetrics.restlessness > 20 -> 20
-            else -> 10
+            motionMetrics.restlessness > 65 -> 82  // Was 80
+            motionMetrics.restlessness > 50 -> 65  // Was 60
+            motionMetrics.restlessness > 35 -> 45  // Was 40
+            motionMetrics.restlessness > 20 -> 25  // Was 20
+            else -> 12                             // Was 10
         }
 
         markers.add(BehavioralMarker(
@@ -401,6 +402,7 @@ class ADHDAnalyzer {
         ))
 
         // DOMAIN SCORE CALCULATIONS - all factors are now on 0-100 scale for consistency
+
         // Attention domain
         val attentionScore = ((lookAwayFactor * 0.25f) +
                 (sustainedAttentionFactor * 0.25f) +
@@ -425,16 +427,31 @@ class ADHDAnalyzer {
                 (accuracyFactor * 0.1f) +
                 (responseTimeFactor * 0.1f)).toInt().coerceIn(0, 100)
 
-        // Overall ADHD probability calculation with weighted domain contributions
-        val adhdProbabilityScore = ((attentionScore * 0.45f) +
+        // Base calculation with domain weighting
+        val baseScore = ((attentionScore * 0.45f) +
                 (hyperactivityScore * 0.3f) +
-                (impulsivityScore * 0.25f)).toInt().coerceIn(0, 100)
+                (impulsivityScore * 0.25f)).toInt()
+
+        // Apply a more moderate exponential boost for high scores
+        val extremeFactorBoost = if (attentionScore > 75 && hyperactivityScore > 70) {
+            // More moderate boost formula
+            min(10, (attentionScore + hyperactivityScore - 145) / 4)
+        } else if (attentionScore > 75 && impulsivityScore > 70) {
+            min(10, (attentionScore + impulsivityScore - 145) / 4)
+        } else if (hyperactivityScore > 75 && impulsivityScore > 70) {
+            min(10, (hyperactivityScore + impulsivityScore - 145) / 4)
+        } else {
+            0
+        }
+
+        // Apply boost to base score
+        val adhdProbabilityScore = (baseScore + extremeFactorBoost).coerceIn(0, 100)
 
         // Calculate confidence level based on data quality
         val confidenceLevel = calculateConfidenceLevel(
-            faceMetrics.faceVisiblePercentage,
-            durationSeconds,
-            markers.size
+            faceVisibility = faceMetrics.faceVisiblePercentage,
+            durationSeconds = durationSeconds,
+            markerCount = markers.size
         )
 
         return ADHDAssessmentResult(
@@ -450,7 +467,7 @@ class ADHDAnalyzer {
 
     private fun calculateConfidenceLevel(
         faceVisibility: Int,
-        duration: Int,
+        durationSeconds: Int,
         markerCount: Int
     ): Int {
         // Base confidence on data quality
@@ -458,9 +475,9 @@ class ADHDAnalyzer {
 
         // Duration affects confidence (longer is better)
         confidence += when {
-            duration >= 120 -> 15
-            duration >= 60 -> 10
-            duration >= 30 -> 5
+            durationSeconds >= 120 -> 15
+            durationSeconds >= 60 -> 10
+            durationSeconds >= 30 -> 5
             else -> 0
         }
 

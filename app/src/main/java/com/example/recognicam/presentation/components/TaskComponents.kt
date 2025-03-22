@@ -279,8 +279,17 @@ fun BehavioralMarkerItem(
         else -> false
     }
 
-    // Calculate normalized percentage for coloring
-    val percentValue = (marker.value / marker.threshold).coerceIn(0f, 2f) * 50f
+    // IMPROVED: Better percentage calculation based on max possible value
+    val percentValue = when {
+        // For percentage-based metrics (restlessness, attention scores, etc.) use raw value
+        marker.name in listOf("Restlessness", "Fidgeting Score", "Distractibility",
+            "Sustained Attention", "Task Accuracy", "Face Visibility",
+            "Facial Movement", "Emotion Variability") ->
+            marker.value
+
+        // For rate-based metrics, use ratio to threshold but amplify high values
+        else -> (marker.value / marker.threshold).coerceIn(0f, 2f) * 50f
+    }
 
     // Determine color based on whether high values are good or bad
     val markerColor = if (isHighValueGood) {
@@ -293,7 +302,7 @@ fun BehavioralMarkerItem(
     } else {
         // For metrics where high values are BAD (like distractibility)
         when {
-            percentValue > 75 -> Error    // Red (concerning)
+            percentValue > 75 -> Error    // Red (concerning - now properly triggers for 94%)
             percentValue > 50 -> Warning  // Orange (moderate)
             else -> Success               // Green (good)
         }
