@@ -1,4 +1,3 @@
-// FullAssessmentViewModel.kt
 package com.example.recognicam.presentation.viewmodel
 
 import android.content.Context
@@ -26,16 +25,16 @@ sealed class FullAssessmentState {
 }
 
 data class FullAssessmentResult(
-    val overallScore: Int,
-    val confidenceLevel: Int,
-    val attentionScore: Int,
-    val hyperactivityScore: Int,
-    val impulsivityScore: Int,
-    val taskResults: Map<String, Any>,
-    val faceMetrics: FaceMetrics,
-    val motionMetrics: MotionMetrics,
-    val behavioralMarkers: List<BehavioralMarker>,
-    val assessmentDuration: Long
+    val overallScore: Int,                     // Overall ADHD probability (0-100)
+    val confidenceLevel: Int,                  // Confidence in assessment (0-100)
+    val attentionScore: Int,                   // Inattention domain score (0-100)
+    val hyperactivityScore: Int,               // Hyperactivity domain score (0-100)
+    val impulsivityScore: Int,                 // Impulsivity domain score (0-100)
+    val taskResults: Map<String, Any>,         // Individual task results
+    val faceMetrics: FaceMetrics,              // Face analysis metrics
+    val motionMetrics: MotionMetrics,          // Motion analysis metrics
+    val behavioralMarkers: List<BehavioralMarker>, // Combined behavioral markers
+    val assessmentDuration: Long               // Total duration in milliseconds
 )
 
 class FullAssessmentViewModel(private val context: Context) : ViewModel() {
@@ -139,110 +138,30 @@ class FullAssessmentViewModel(private val context: Context) : ViewModel() {
         val endTime = System.currentTimeMillis()
         val totalDuration = endTime - startTime
 
-        // Calculate overall ADHD probability score (weighted average)
-        val scores = listOfNotNull(
-            cptResult?.adhdAssessment?.adhdProbabilityScore,
-            readingResult?.adhdAssessment?.adhdProbabilityScore,
-            goNoGoResult?.adhdAssessment?.adhdProbabilityScore,
-            workingMemoryResult?.adhdAssessment?.adhdProbabilityScore,
-            attentionShiftingResult?.adhdAssessment?.adhdProbabilityScore
+        // Calculate comprehensive domain scores based on all tasks
+        val attentionScores = calculateAttentionScores()
+        val hyperactivityScores = calculateHyperactivityScores()
+        val impulsivityScores = calculateImpulsivityScores()
+
+        // Combine behavioral markers from all tasks
+        val allMarkers = combineMarkers()
+
+        // Get the latest sensor metrics from the most recent task (usually attention shifting)
+        val latestFaceMetrics = getLatestFaceMetrics()
+        val latestMotionMetrics = getLatestMotionMetrics()
+
+        // Calculate overall ADHD probability with proper domain weighting
+        val overallScore = (attentionScores.average() * 0.45 +
+                hyperactivityScores.average() * 0.3 +
+                impulsivityScores.average() * 0.25).toInt()
+
+        // Calculate confidence level
+        val confidenceLevel = calculateConfidenceLevel(
+            faceVisibility = latestFaceMetrics.faceVisiblePercentage,
+            tasksCompleted = countCompletedTasks(),
+            duration = (totalDuration / 1000 / 60).toInt(), // in minutes
+            markerCount = allMarkers.size
         )
-
-        // If no scores, we can't proceed
-        if (scores.isEmpty()) {
-            // This shouldn't happen normally since we guide through all tasks
-            return
-        }
-
-        // Calculate composite scores using proper collection methods
-        val attentionScores = mutableListOf<Float>()
-        cptResult?.adhdAssessment?.attentionScore?.let { attentionScores.add(it * 1.2f) }
-        readingResult?.adhdAssessment?.attentionScore?.let { attentionScores.add(it.toFloat()) }
-        goNoGoResult?.adhdAssessment?.attentionScore?.let { attentionScores.add(it.toFloat()) }
-        workingMemoryResult?.adhdAssessment?.attentionScore?.let { attentionScores.add(it.toFloat()) }
-        attentionShiftingResult?.adhdAssessment?.attentionScore?.let { attentionScores.add(it * 1.1f) }
-
-        val hyperactivityScores = mutableListOf<Float>()
-        cptResult?.adhdAssessment?.hyperactivityScore?.let { hyperactivityScores.add(it.toFloat()) }
-        readingResult?.adhdAssessment?.hyperactivityScore?.let { hyperactivityScores.add(it.toFloat()) }
-        goNoGoResult?.adhdAssessment?.hyperactivityScore?.let { hyperactivityScores.add(it * 1.1f) }
-        workingMemoryResult?.adhdAssessment?.hyperactivityScore?.let { hyperactivityScores.add(it.toFloat()) }
-        attentionShiftingResult?.adhdAssessment?.hyperactivityScore?.let { hyperactivityScores.add(it.toFloat()) }
-
-        val impulsivityScores = mutableListOf<Float>()
-        cptResult?.adhdAssessment?.impulsivityScore?.let { impulsivityScores.add(it.toFloat()) }
-        readingResult?.adhdAssessment?.impulsivityScore?.let { impulsivityScores.add(it.toFloat()) }
-        goNoGoResult?.adhdAssessment?.impulsivityScore?.let { impulsivityScores.add(it * 1.3f) }
-        workingMemoryResult?.adhdAssessment?.impulsivityScore?.let { impulsivityScores.add(it.toFloat()) }
-        attentionShiftingResult?.adhdAssessment?.impulsivityScore?.let { impulsivityScores.add(it.toFloat()) }
-
-        // Calculate composite domain scores
-        val compositeAttentionScore = if (attentionScores.isNotEmpty()) {
-            attentionScores.sum() / attentionScores.size
-        } else 0f
-
-        val compositeHyperactivityScore = if (hyperactivityScores.isNotEmpty()) {
-            hyperactivityScores.sum() / hyperactivityScores.size
-        } else 0f
-
-        val compositeImpulsivityScore = if (impulsivityScores.isNotEmpty()) {
-            impulsivityScores.sum() / impulsivityScores.size
-        } else 0f
-
-        // Calculate overall probability (40% attention, 30% hyperactivity, 30% impulsivity)
-        val overallProbability = (compositeAttentionScore.toInt() * 0.4 +
-                compositeHyperactivityScore.toInt() * 0.3 +
-                compositeImpulsivityScore.toInt() * 0.3).toInt()
-
-        // Determine the highest confidence level from individual assessments
-        val confidenceLevels = listOfNotNull(
-            cptResult?.adhdAssessment?.confidenceLevel,
-            readingResult?.adhdAssessment?.confidenceLevel,
-            goNoGoResult?.adhdAssessment?.confidenceLevel,
-            workingMemoryResult?.adhdAssessment?.confidenceLevel,
-            attentionShiftingResult?.adhdAssessment?.confidenceLevel
-        )
-
-        val overallConfidence = if (confidenceLevels.isNotEmpty()) {
-            // Slight boost to confidence since we have multiple assessments
-            (confidenceLevels.average() * 1.1).toInt().coerceAtMost(100)
-        } else {
-            70 // Default reasonable confidence
-        }
-
-        // Combine behavioral markers (taking the most significant ones)
-        val allMarkers = mutableListOf<BehavioralMarker>()
-        cptResult?.adhdAssessment?.behavioralMarkers?.let { allMarkers.addAll(it) }
-        readingResult?.adhdAssessment?.behavioralMarkers?.let { allMarkers.addAll(it) }
-        goNoGoResult?.adhdAssessment?.behavioralMarkers?.let { allMarkers.addAll(it) }
-        workingMemoryResult?.adhdAssessment?.behavioralMarkers?.let { allMarkers.addAll(it) }
-        attentionShiftingResult?.adhdAssessment?.behavioralMarkers?.let { allMarkers.addAll(it) }
-
-        // Get the most significant markers (avoid duplicates by name)
-        val significantMarkers = allMarkers
-            .groupBy { it.name }
-            .map { (_, markers) ->
-                // For each marker name, pick the one with highest significance * (value/threshold)
-                markers.maxByOrNull { it.significance * (it.value / it.threshold) }
-            }
-            .filterNotNull()
-            .sortedByDescending { it.significance * (it.value / it.threshold) }
-            .take(12) // Take top 12 most significant markers
-
-        // Get the latest sensor metrics from the last task (should be attention shifting)
-        val latestFaceMetrics = attentionShiftingResult?.faceMetrics ?:
-        workingMemoryResult?.faceMetrics ?:
-        goNoGoResult?.faceMetrics ?:
-        readingResult?.faceMetrics ?:
-        cptResult?.faceMetrics ?:
-        FaceMetrics()
-
-        val latestMotionMetrics = attentionShiftingResult?.motionMetrics ?:
-        workingMemoryResult?.motionMetrics ?:
-        goNoGoResult?.motionMetrics ?:
-        readingResult?.motionMetrics ?:
-        cptResult?.motionMetrics ?:
-        MotionMetrics()
 
         // Create a map of task results
         val taskResults = mapOf(
@@ -255,20 +174,220 @@ class FullAssessmentViewModel(private val context: Context) : ViewModel() {
 
         // Create the full assessment result
         val fullResult = FullAssessmentResult(
-            overallScore = overallProbability,
-            confidenceLevel = overallConfidence,
-            attentionScore = compositeAttentionScore.toInt(),
-            hyperactivityScore = compositeHyperactivityScore.toInt(),
-            impulsivityScore = compositeImpulsivityScore.toInt(),
+            overallScore = overallScore,
+            confidenceLevel = confidenceLevel,
+            attentionScore = attentionScores.average().toInt(),
+            hyperactivityScore = hyperactivityScores.average().toInt(),
+            impulsivityScore = impulsivityScores.average().toInt(),
             taskResults = taskResults,
             faceMetrics = latestFaceMetrics,
             motionMetrics = latestMotionMetrics,
-            behavioralMarkers = significantMarkers,
+            behavioralMarkers = allMarkers,
             assessmentDuration = totalDuration
         )
 
         // Update UI state with the result
         _uiState.value = FullAssessmentState.Completed(fullResult)
+    }
+
+    private fun calculateAttentionScores(): List<Int> {
+        val scores = mutableListOf<Int>()
+
+        // Add CPT attention score with higher weight (primary attention task)
+        cptResult?.adhdAssessment?.attentionScore?.let {
+            scores.add((it * 1.2).toInt().coerceIn(0, 100))
+        }
+
+        // Add Reading task attention score
+        readingResult?.adhdAssessment?.attentionScore?.let {
+            scores.add(it)
+        }
+
+        // Add Go/No-Go attention component
+        goNoGoResult?.adhdAssessment?.attentionScore?.let {
+            scores.add(it)
+        }
+
+        // Add Working Memory attention component
+        workingMemoryResult?.adhdAssessment?.attentionScore?.let {
+            scores.add(it)
+        }
+
+        // Add Attention Shifting attention component with higher weight
+        attentionShiftingResult?.adhdAssessment?.attentionScore?.let {
+            scores.add((it * 1.1).toInt().coerceIn(0, 100))
+        }
+
+        return scores.ifEmpty { listOf(0) }
+    }
+
+    private fun calculateHyperactivityScores(): List<Int> {
+        val scores = mutableListOf<Int>()
+
+        // Add hyperactivity scores from each task
+        cptResult?.adhdAssessment?.hyperactivityScore?.let {
+            scores.add(it)
+        }
+
+        readingResult?.adhdAssessment?.hyperactivityScore?.let {
+            scores.add(it)
+        }
+
+        // Go/No-Go has more hyperactivity relevance
+        goNoGoResult?.adhdAssessment?.hyperactivityScore?.let {
+            scores.add((it * 1.1).toInt().coerceIn(0, 100))
+        }
+
+        workingMemoryResult?.adhdAssessment?.hyperactivityScore?.let {
+            scores.add(it)
+        }
+
+        attentionShiftingResult?.adhdAssessment?.hyperactivityScore?.let {
+            scores.add(it)
+        }
+
+        return scores.ifEmpty { listOf(0) }
+    }
+
+    private fun calculateImpulsivityScores(): List<Int> {
+        val scores = mutableListOf<Int>()
+
+        // Add impulsivity scores from each task
+        cptResult?.adhdAssessment?.impulsivityScore?.let {
+            scores.add(it)
+        }
+
+        readingResult?.adhdAssessment?.impulsivityScore?.let {
+            scores.add(it)
+        }
+
+        // Go/No-Go has more impulsivity relevance (highest weight)
+        goNoGoResult?.adhdAssessment?.impulsivityScore?.let {
+            scores.add((it * 1.3).toInt().coerceIn(0, 100))
+        }
+
+        workingMemoryResult?.adhdAssessment?.impulsivityScore?.let {
+            scores.add(it)
+        }
+
+        attentionShiftingResult?.adhdAssessment?.impulsivityScore?.let {
+            scores.add(it)
+        }
+
+        return scores.ifEmpty { listOf(0) }
+    }
+
+    private fun combineMarkers(): List<BehavioralMarker> {
+        val allMarkers = mutableListOf<BehavioralMarker>()
+
+        // Collect markers from all tasks
+        cptResult?.adhdAssessment?.behavioralMarkers?.let {
+            allMarkers.addAll(it)
+        }
+
+        readingResult?.adhdAssessment?.behavioralMarkers?.let {
+            allMarkers.addAll(it)
+        }
+
+        goNoGoResult?.adhdAssessment?.behavioralMarkers?.let {
+            allMarkers.addAll(it)
+        }
+
+        workingMemoryResult?.adhdAssessment?.behavioralMarkers?.let {
+            allMarkers.addAll(it)
+        }
+
+        attentionShiftingResult?.adhdAssessment?.behavioralMarkers?.let {
+            allMarkers.addAll(it)
+        }
+
+        // Group by marker name and take the most significant for each
+        return allMarkers
+            .groupBy { it.name }
+            .map { (_, markers) ->
+                // For each marker name, pick the one with highest significance * (value/threshold) ratio
+                markers.maxByOrNull {
+                    it.significance * (it.value / it.threshold)
+                } ?: markers.first()
+            }
+            .sortedByDescending {
+                it.significance * (it.value / it.threshold)
+            }
+    }
+
+    private fun getLatestFaceMetrics(): FaceMetrics {
+        return attentionShiftingResult?.faceMetrics ?:
+        workingMemoryResult?.faceMetrics ?:
+        goNoGoResult?.faceMetrics ?:
+        readingResult?.faceMetrics ?:
+        cptResult?.faceMetrics ?:
+        FaceMetrics()
+    }
+
+    private fun getLatestMotionMetrics(): MotionMetrics {
+        return attentionShiftingResult?.motionMetrics ?:
+        workingMemoryResult?.motionMetrics ?:
+        goNoGoResult?.motionMetrics ?:
+        readingResult?.motionMetrics ?:
+        cptResult?.motionMetrics ?:
+        MotionMetrics()
+    }
+
+    private fun countCompletedTasks(): Int {
+        var count = 0
+        if (cptResult != null) count++
+        if (readingResult != null) count++
+        if (goNoGoResult != null) count++
+        if (workingMemoryResult != null) count++
+        if (attentionShiftingResult != null) count++
+        return count
+    }
+
+    private fun calculateConfidenceLevel(
+        faceVisibility: Int,
+        tasksCompleted: Int,
+        duration: Int,
+        markerCount: Int
+    ): Int {
+        // Start with a high baseline confidence
+        var confidence = 80
+
+        // Number of completed tasks has high impact
+        confidence += when (tasksCompleted) {
+            5 -> 20
+            4 -> 15
+            3 -> 5
+            2 -> -5
+            1 -> -15
+            else -> -20
+        }
+
+        // Face visibility affects confidence
+        confidence += when {
+            faceVisibility > 90 -> 10
+            faceVisibility > 80 -> 5
+            faceVisibility > 70 -> 0
+            faceVisibility > 60 -> -5
+            else -> -10
+        }
+
+        // Total assessment duration
+        confidence += when {
+            duration >= 15 -> 10
+            duration >= 10 -> 5
+            duration >= 5 -> 0
+            else -> -5
+        }
+
+        // Marker count provides more data points
+        confidence += when {
+            markerCount >= 15 -> 5
+            markerCount >= 10 -> 3
+            markerCount >= 5 -> 0
+            else -> -5
+        }
+
+        return confidence.coerceIn(0, 100)
     }
 
     class Factory(private val context: Context) : ViewModelProvider.Factory {
