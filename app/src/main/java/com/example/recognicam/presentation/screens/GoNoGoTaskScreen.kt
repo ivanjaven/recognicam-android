@@ -67,7 +67,7 @@ fun GoNoGoTaskScreen(
 
     // Configure task for regular testing
     LaunchedEffect(Unit) {
-        viewModel.configureDuration(40) // 40 seconds for regular testing
+        viewModel.configureDuration(120) // 40 seconds for regular testing
     }
 
     val uiState by viewModel.uiState.collectAsState()

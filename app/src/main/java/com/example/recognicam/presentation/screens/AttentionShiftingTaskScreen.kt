@@ -63,7 +63,7 @@ fun AttentionShiftingTaskScreen(
 
     // Configure task for regular testing
     LaunchedEffect(Unit) {
-        viewModel.configureDuration(60) // 60 seconds for regular testing
+        viewModel.configureDuration(120) // 60 seconds for regular testing
     }
 
     val uiState by viewModel.uiState.collectAsState()

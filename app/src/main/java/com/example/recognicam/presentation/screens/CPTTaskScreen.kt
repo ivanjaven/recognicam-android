@@ -65,7 +65,7 @@ fun CPTTaskScreen(
 
     // Configure task for faster testing
     LaunchedEffect(Unit) {
-        viewModel.configureDuration(30) // 30 seconds for faster testing
+        viewModel.configureDuration(120) // 30 seconds for faster testing
     }
 
     val uiState by viewModel.uiState.collectAsState()
