@@ -159,6 +159,16 @@ fun ReadingTaskScreen(
                         .fillMaxSize()
                         .padding(16.dp)
                 ) {
+                    Box(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(bottom = 16.dp),
+                        contentAlignment = Alignment.TopEnd
+                    ) {
+                        CameraActiveIndicator(
+                            modifier = Modifier.padding(top = 8.dp, end = 16.dp)
+                        )
+                    }
                     // Reading passage card
                     Card(
                         modifier = Modifier
@@ -270,6 +280,16 @@ fun ReadingTaskScreen(
                         .fillMaxSize()
                         .padding(16.dp)
                 ) {
+                    Box(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(bottom = 16.dp),
+                        contentAlignment = Alignment.TopEnd
+                    ) {
+                        CameraActiveIndicator(
+                            modifier = Modifier.padding(top = 8.dp, end = 16.dp)
+                        )
+                    }
                     // Question card
                     Card(
                         modifier = Modifier

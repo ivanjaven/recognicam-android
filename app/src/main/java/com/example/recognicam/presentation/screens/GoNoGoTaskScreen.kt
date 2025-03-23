@@ -162,13 +162,21 @@ fun GoNoGoTaskScreen(
                 }
 
                 // Timer display
-                Text(
-                    text = "${timeRemaining}s",
-                    style = MaterialTheme.typography.titleMedium,
+                Row(
                     modifier = Modifier
                         .align(Alignment.TopEnd)
-                        .padding(20.dp)
-                )
+                        .padding(20.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    CameraActiveIndicator(
+                        modifier = Modifier.padding(end = 12.dp)
+                    )
+
+                    Text(
+                        text = "${timeRemaining}s",
+                        style = MaterialTheme.typography.titleMedium
+                    )
+                }
 
                 // Main content area for stimulus
                 Box(

@@ -26,6 +26,7 @@ import androidx.core.content.ContextCompat
 import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.navigation.NavController
 import com.example.recognicam.presentation.components.AnimatedStimulus
+import com.example.recognicam.presentation.components.CameraActiveIndicator
 import com.example.recognicam.presentation.components.CountdownTimer
 import com.example.recognicam.presentation.components.InstructionBar
 import com.example.recognicam.presentation.components.ResultMetricItem
@@ -162,13 +163,22 @@ fun WorkingMemoryTaskScreen(
                 }
 
                 // Timer display
-                Text(
-                    text = "${timeRemaining}s",
-                    style = MaterialTheme.typography.titleMedium,
+                // Timer display
+                Row(
                     modifier = Modifier
                         .align(Alignment.TopEnd)
-                        .padding(20.dp)
-                )
+                        .padding(20.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    CameraActiveIndicator(
+                        modifier = Modifier.padding(end = 12.dp)
+                    )
+
+                    Text(
+                        text = "${timeRemaining}s",
+                        style = MaterialTheme.typography.titleMedium
+                    )
+                }
 
                 // Main content area for stimulus
                 Box(
