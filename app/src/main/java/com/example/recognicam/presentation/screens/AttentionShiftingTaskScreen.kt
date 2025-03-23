@@ -84,7 +84,14 @@ fun AttentionShiftingTaskScreen(
     }
 
     when (val state = uiState) {
+        is AttentionShiftingTaskState.PreInstructions -> {
+            QuickAssessmentInstructions(
+                taskName = "Attention Shifting Task",
+                onBeginAssessment = { viewModel.proceedToTaskInstructions() }
+            )
+        }
         is AttentionShiftingTaskState.Instructions -> {
+            // Existing Instructions code stays as is
             TaskInstructions(
                 title = "Attention Shifting Task",
                 instructions = listOf(

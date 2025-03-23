@@ -35,23 +35,23 @@ fun FullAssessmentScreen(navController: NavController) {
 
     // Set up task ViewModels that will be reused for each task
     val cptViewModel: CPTTaskViewModel = viewModel(
-        factory = CPTTaskViewModel.Factory(context)
+        factory = CPTTaskViewModel.Factory(context, true)
     )
 
     val readingViewModel: ReadingTaskViewModel = viewModel(
-        factory = ReadingTaskViewModel.Factory(context)
+        factory = ReadingTaskViewModel.Factory(context, true)
     )
 
     val goNoGoViewModel: GoNoGoTaskViewModel = viewModel(
-        factory = GoNoGoTaskViewModel.Factory(context)
+        factory = GoNoGoTaskViewModel.Factory(context, true)
     )
 
     val workingMemoryViewModel: WorkingMemoryTaskViewModel = viewModel(
-        factory = WorkingMemoryTaskViewModel.Factory(context)
+        factory = WorkingMemoryTaskViewModel.Factory(context, true)
     )
 
     val attentionShiftingViewModel: AttentionShiftingTaskViewModel = viewModel(
-        factory = AttentionShiftingTaskViewModel.Factory(context)
+        factory = AttentionShiftingTaskViewModel.Factory(context, true)
     )
 
     // Configure shorter durations for all tasks in the full assessment
@@ -233,6 +233,8 @@ fun FullAssessmentInstructions(
                 BulletPoint("Try to maintain focus during the tasks and give your best effort")
                 BulletPoint("Take breaks between tasks if needed, but try to complete the full assessment in one session")
                 BulletPoint("Answer honestly and don't overthink your responses")
+                BulletPoint("This assessment uses your device's camera to analyze attention patterns during the task. " +
+                        "Your privacy is important - no video is stored or transmitted.")
             }
         }
 

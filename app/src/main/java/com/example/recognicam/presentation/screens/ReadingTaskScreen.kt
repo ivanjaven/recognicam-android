@@ -79,7 +79,14 @@ fun ReadingTaskScreen(
     }
 
     when (val state = uiState) {
+        is ReadingTaskState.PreInstructions -> {
+            QuickAssessmentInstructions(
+                taskName = "Reading Assessment",
+                onBeginAssessment = { viewModel.proceedToTaskInstructions() }
+            )
+        }
         is ReadingTaskState.Instructions -> {
+            // Existing Instructions code stays as is
             TaskInstructions(
                 title = "Reading Assessment",
                 instructions = listOf(

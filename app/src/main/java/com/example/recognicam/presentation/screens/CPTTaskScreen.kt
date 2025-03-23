@@ -71,7 +71,14 @@ fun CPTTaskScreen(
     val uiState by viewModel.uiState.collectAsState()
 
     when (val state = uiState) {
+        is CPTTaskState.PreInstructions -> {
+            QuickAssessmentInstructions(
+                taskName = "Continuous Performance Test",
+                onBeginAssessment = { viewModel.proceedToTaskInstructions() }
+            )
+        }
         is CPTTaskState.Instructions -> {
+            // Existing Instructions code stays as is
             TaskInstructions(
                 title = "Continuous Performance Test",
                 instructions = listOf(
@@ -90,6 +97,7 @@ fun CPTTaskScreen(
                 }
             )
         }
+        // Rest remains unchanged
 
         is CPTTaskState.Countdown -> {
             CountdownTimer(

@@ -17,6 +17,7 @@ import kotlin.random.Random
 
 // Definition of UI state for CPT task
 sealed class CPTTaskState {
+    object PreInstructions : CPTTaskState()
     object Instructions : CPTTaskState()
     data class Countdown(val count: Int) : CPTTaskState()
     object Running : CPTTaskState()
@@ -38,13 +39,16 @@ data class CPTTaskResult(
 )
 
 class CPTTaskViewModel(
-    private val context: Context
+    private val context: Context,
+    private val isPartOfFullAssessment: Boolean = false
 ) : BaseAssessmentTaskViewModel() {
 
     private val adhdAnalyzer = ADHDAnalyzer()
 
     // Task UI state
-    private val _uiState = MutableStateFlow<CPTTaskState>(CPTTaskState.Instructions)
+    private val _uiState = MutableStateFlow<CPTTaskState>(
+        if (isPartOfFullAssessment) CPTTaskState.Instructions
+        else CPTTaskState.PreInstructions)
     val uiState: StateFlow<CPTTaskState> = _uiState.asStateFlow()
 
     // CPT specific states
@@ -65,7 +69,7 @@ class CPTTaskViewModel(
     private var stimulusShownTime = 0L
 
     // Task parameters
-    private val letters = listOf('A', 'B', 'C', 'D', 'E', 'F', 'G', 'H', 'I', 'J', 'K', 'L')
+    private val letters = listOf('A', 'B', 'C', 'D', 'E', 'F', 'G', 'H', 'I', 'J')
     private val targetLetter = 'X'
     private var stimulusTimer: CountDownTimer? = null
 
@@ -74,6 +78,9 @@ class CPTTaskViewModel(
         if (!motionDetectionService.isTracking()) {
             motionDetectionService.resetTracking()
         }
+    }
+    fun proceedToTaskInstructions() {
+        _uiState.value = CPTTaskState.Instructions
     }
 
     fun startCountdown() {
@@ -301,11 +308,14 @@ class CPTTaskViewModel(
         stimulusTimer?.cancel()
     }
 
-    class Factory(private val context: Context) : ViewModelProvider.Factory {
+    class Factory(
+        private val context: Context,
+        private val isPartOfFullAssessment: Boolean = false  // Add this parameter
+    ) : ViewModelProvider.Factory {
         @Suppress("UNCHECKED_CAST")
         override fun <T : androidx.lifecycle.ViewModel> create(modelClass: Class<T>): T {
             if (modelClass.isAssignableFrom(CPTTaskViewModel::class.java)) {
-                return CPTTaskViewModel(context) as T
+                return CPTTaskViewModel(context, isPartOfFullAssessment) as T
             }
             throw IllegalArgumentException("Unknown ViewModel class")
         }

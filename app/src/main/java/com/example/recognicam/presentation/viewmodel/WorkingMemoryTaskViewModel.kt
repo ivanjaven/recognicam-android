@@ -16,6 +16,7 @@ import kotlin.math.sqrt
 import kotlin.random.Random
 
 sealed class WorkingMemoryTaskState {
+    object PreInstructions : WorkingMemoryTaskState()
     object Instructions : WorkingMemoryTaskState()
     data class Countdown(val count: Int) : WorkingMemoryTaskState()
     object Running : WorkingMemoryTaskState()
@@ -38,13 +39,17 @@ data class WorkingMemoryTaskResultUI(
 )
 
 class WorkingMemoryTaskViewModel(
-    private val context: Context
+    private val context: Context,
+    private val isPartOfFullAssessment: Boolean = false
 ) : BaseAssessmentTaskViewModel() {
 
     private val adhdAnalyzer = ADHDAnalyzer()
 
     // Task UI state
-    private val _uiState = MutableStateFlow<WorkingMemoryTaskState>(WorkingMemoryTaskState.Instructions)
+    private val _uiState = MutableStateFlow<WorkingMemoryTaskState>(
+        if (isPartOfFullAssessment) WorkingMemoryTaskState.Instructions
+        else WorkingMemoryTaskState.PreInstructions
+    )
     val uiState: StateFlow<WorkingMemoryTaskState> = _uiState.asStateFlow()
 
     // Task parameters
@@ -79,6 +84,10 @@ class WorkingMemoryTaskViewModel(
         if (!motionDetectionService.isTracking()) {
             motionDetectionService.resetTracking()
         }
+    }
+
+    fun proceedToTaskInstructions() {
+        _uiState.value = WorkingMemoryTaskState.Instructions
     }
 
     fun startCountdown() {
@@ -307,11 +316,14 @@ class WorkingMemoryTaskViewModel(
         stimulusTimer?.cancel()
     }
 
-    class Factory(private val context: Context) : ViewModelProvider.Factory {
+    class Factory(
+        private val context: Context,
+        private val isPartOfFullAssessment: Boolean = false  // Add this parameter
+    ) : ViewModelProvider.Factory {
         @Suppress("UNCHECKED_CAST")
         override fun <T : androidx.lifecycle.ViewModel> create(modelClass: Class<T>): T {
             if (modelClass.isAssignableFrom(WorkingMemoryTaskViewModel::class.java)) {
-                return WorkingMemoryTaskViewModel(context) as T
+                return WorkingMemoryTaskViewModel(context, isPartOfFullAssessment) as T
             }
             throw IllegalArgumentException("Unknown ViewModel class")
         }

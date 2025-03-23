@@ -16,6 +16,7 @@ import kotlin.math.sqrt
 import kotlin.random.Random
 
 sealed class GoNoGoTaskState {
+    object PreInstructions : GoNoGoTaskState()
     object Instructions : GoNoGoTaskState()
     data class Countdown(val count: Int) : GoNoGoTaskState()
     object Running : GoNoGoTaskState()
@@ -42,13 +43,17 @@ data class GoNoGoTaskResultUI(
 )
 
 class GoNoGoTaskViewModel(
-    private val context: Context
+    private val context: Context,
+    private val isPartOfFullAssessment: Boolean = false
 ) : BaseAssessmentTaskViewModel() {
 
     private val adhdAnalyzer = ADHDAnalyzer()
 
     // Task UI state
-    private val _uiState = MutableStateFlow<GoNoGoTaskState>(GoNoGoTaskState.Instructions)
+    private val _uiState = MutableStateFlow<GoNoGoTaskState>(
+        if (isPartOfFullAssessment) GoNoGoTaskState.Instructions
+        else GoNoGoTaskState.PreInstructions
+    )
     val uiState: StateFlow<GoNoGoTaskState> = _uiState.asStateFlow()
 
     // Task parameters
@@ -74,6 +79,10 @@ class GoNoGoTaskViewModel(
         if (!motionDetectionService.isTracking()) {
             motionDetectionService.resetTracking()
         }
+    }
+
+    fun proceedToTaskInstructions() {
+        _uiState.value = GoNoGoTaskState.Instructions
     }
 
     fun startCountdown() {
@@ -293,11 +302,14 @@ class GoNoGoTaskViewModel(
         stimulusTimer?.cancel()
     }
 
-    class Factory(private val context: Context) : ViewModelProvider.Factory {
+    class Factory(
+        private val context: Context,
+        private val isPartOfFullAssessment: Boolean = false
+    ) : ViewModelProvider.Factory {
         @Suppress("UNCHECKED_CAST")
         override fun <T : androidx.lifecycle.ViewModel> create(modelClass: Class<T>): T {
             if (modelClass.isAssignableFrom(GoNoGoTaskViewModel::class.java)) {
-                return GoNoGoTaskViewModel(context) as T
+                return GoNoGoTaskViewModel(context, isPartOfFullAssessment) as T
             }
             throw IllegalArgumentException("Unknown ViewModel class")
         }

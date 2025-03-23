@@ -15,6 +15,7 @@ import kotlinx.coroutines.flow.asStateFlow
 
 // Definition of UI state for Reading task
 sealed class ReadingTaskState {
+    object PreInstructions : ReadingTaskState()
     object Instructions : ReadingTaskState()
     data class Countdown(val count: Int) : ReadingTaskState()
     data class Reading(val passage: ReadingPassage) : ReadingTaskState()
@@ -52,13 +53,17 @@ data class ReadingTaskResultUI(
 )
 
 class ReadingTaskViewModel(
-    private val context: Context
+    private val context: Context,
+    private val isPartOfFullAssessment: Boolean = false
 ) : BaseAssessmentTaskViewModel() {
 
     private val adhdAnalyzer = ADHDAnalyzer()
 
     // Task UI state
-    private val _uiState = MutableStateFlow<ReadingTaskState>(ReadingTaskState.Instructions)
+    private val _uiState = MutableStateFlow<ReadingTaskState>(
+        if (isPartOfFullAssessment) ReadingTaskState.Instructions
+        else ReadingTaskState.PreInstructions
+    )
     val uiState: StateFlow<ReadingTaskState> = _uiState.asStateFlow()
 
     // Current question management
@@ -159,6 +164,10 @@ class ReadingTaskViewModel(
         if (!motionDetectionService.isTracking()) {
             motionDetectionService.resetTracking()
         }
+    }
+
+    fun proceedToTaskInstructions() {
+        _uiState.value = ReadingTaskState.Instructions
     }
 
     fun startCountdown() {
@@ -368,11 +377,14 @@ class ReadingTaskViewModel(
         super.onCleared()
     }
 
-    class Factory(private val context: Context) : ViewModelProvider.Factory {
+    class Factory(
+        private val context: Context,
+        private val isPartOfFullAssessment: Boolean = false  // Add this parameter
+    ) : ViewModelProvider.Factory {
         @Suppress("UNCHECKED_CAST")
         override fun <T : androidx.lifecycle.ViewModel> create(modelClass: Class<T>): T {
             if (modelClass.isAssignableFrom(ReadingTaskViewModel::class.java)) {
-                return ReadingTaskViewModel(context) as T
+                return ReadingTaskViewModel(context, isPartOfFullAssessment) as T
             }
             throw IllegalArgumentException("Unknown ViewModel class")
         }

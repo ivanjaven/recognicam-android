@@ -29,6 +29,7 @@ import com.example.recognicam.presentation.components.AnimatedStimulus
 import com.example.recognicam.presentation.components.CameraActiveIndicator
 import com.example.recognicam.presentation.components.CountdownTimer
 import com.example.recognicam.presentation.components.InstructionBar
+import com.example.recognicam.presentation.components.QuickAssessmentInstructions
 import com.example.recognicam.presentation.components.ResultMetricItem
 import com.example.recognicam.presentation.components.TaskInstructions
 import com.example.recognicam.presentation.components.TaskResultsView
@@ -87,7 +88,14 @@ fun WorkingMemoryTaskScreen(
     }
 
     when (val state = uiState) {
+        is WorkingMemoryTaskState.PreInstructions -> {
+            QuickAssessmentInstructions(
+                taskName = "Working Memory Task",
+                onBeginAssessment = { viewModel.proceedToTaskInstructions() }
+            )
+        }
         is WorkingMemoryTaskState.Instructions -> {
+            // Existing Instructions code stays as is
             TaskInstructions(
                 title = "Working Memory Task",
                 instructions = listOf(
@@ -106,6 +114,7 @@ fun WorkingMemoryTaskScreen(
                 }
             )
         }
+
 
         is WorkingMemoryTaskState.Countdown -> {
             CountdownTimer(

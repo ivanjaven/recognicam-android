@@ -86,7 +86,14 @@ fun GoNoGoTaskScreen(
     }
 
     when (val state = uiState) {
+        is GoNoGoTaskState.PreInstructions -> {
+            QuickAssessmentInstructions(
+                taskName = "Go/No-Go Task",
+                onBeginAssessment = { viewModel.proceedToTaskInstructions() }
+            )
+        }
         is GoNoGoTaskState.Instructions -> {
+            // Existing Instructions code stays as is
             TaskInstructions(
                 title = "Go/No-Go Task",
                 instructions = listOf(
@@ -105,6 +112,7 @@ fun GoNoGoTaskScreen(
                 }
             )
         }
+        // Rest remains unchanged
 
         is GoNoGoTaskState.Countdown -> {
             CountdownTimer(

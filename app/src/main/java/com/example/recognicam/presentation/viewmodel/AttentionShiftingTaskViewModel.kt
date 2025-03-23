@@ -20,6 +20,7 @@ enum class Rule {
 }
 
 sealed class AttentionShiftingTaskState {
+    object PreInstructions : AttentionShiftingTaskState()
     object Instructions : AttentionShiftingTaskState()
     data class Countdown(val count: Int) : AttentionShiftingTaskState()
     object Running : AttentionShiftingTaskState()
@@ -43,13 +44,17 @@ data class AttentionShiftingTaskResultUI(
 )
 
 class AttentionShiftingTaskViewModel(
-    private val context: Context
+    private val context: Context,
+    private val isPartOfFullAssessment: Boolean = false
 ) : BaseAssessmentTaskViewModel() {
 
     private val adhdAnalyzer = ADHDAnalyzer()
 
     // Task UI state
-    private val _uiState = MutableStateFlow<AttentionShiftingTaskState>(AttentionShiftingTaskState.Instructions)
+    private val _uiState = MutableStateFlow<AttentionShiftingTaskState>(
+        if (isPartOfFullAssessment) AttentionShiftingTaskState.Instructions
+        else AttentionShiftingTaskState.PreInstructions
+    )
     val uiState: StateFlow<AttentionShiftingTaskState> = _uiState.asStateFlow()
 
     // Task parameters
@@ -93,6 +98,10 @@ class AttentionShiftingTaskViewModel(
         if (!motionDetectionService.isTracking()) {
             motionDetectionService.resetTracking()
         }
+    }
+
+    fun proceedToTaskInstructions() {
+        _uiState.value = AttentionShiftingTaskState.Instructions
     }
 
     fun startCountdown() {
@@ -361,11 +370,14 @@ class AttentionShiftingTaskViewModel(
         stimulusTimer?.cancel()
     }
 
-    class Factory(private val context: Context) : ViewModelProvider.Factory {
+    class Factory(
+        private val context: Context,
+        private val isPartOfFullAssessment: Boolean = false  // Add this parameter
+    ) : ViewModelProvider.Factory {
         @Suppress("UNCHECKED_CAST")
         override fun <T : androidx.lifecycle.ViewModel> create(modelClass: Class<T>): T {
             if (modelClass.isAssignableFrom(AttentionShiftingTaskViewModel::class.java)) {
-                return AttentionShiftingTaskViewModel(context) as T
+                return AttentionShiftingTaskViewModel(context, isPartOfFullAssessment) as T
             }
             throw IllegalArgumentException("Unknown ViewModel class")
         }
