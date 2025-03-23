@@ -44,24 +44,24 @@ class MotionDetectionService(context: Context) : SensorEventListener {
     private var movingAverageZ = 0f
 
     // Improved thresholds for better detection
-    private val NOISE_THRESHOLD = 0.07f           // Small movements below this are considered noise
-    private val MEANINGFUL_MOVEMENT_THRESHOLD = 0.12f  // Threshold for counting as restlessness
-    private val FIDGET_THRESHOLD = 0.15f          // Threshold for potential fidgeting (higher than MEANINGFUL)
-    private val MEDIUM_MOVEMENT_THRESHOLD = 0.4f  // Medium movements
-    private val LARGE_MOVEMENT_THRESHOLD = 0.8f   // Large movements
-    private val SUDDEN_MOVEMENT_THRESHOLD = 1.3f  // Sudden/fast movements
+    private val NOISE_THRESHOLD = 0.1f            // Increased to reduce noise when stationary
+    private val MEANINGFUL_MOVEMENT_THRESHOLD = 0.15f  // Threshold for counting as restlessness (increased)
+    private val FIDGET_THRESHOLD = 0.2f           // Threshold for potential fidgeting (increased)
+    private val MEDIUM_MOVEMENT_THRESHOLD = 0.5f  // Medium movements (increased)
+    private val LARGE_MOVEMENT_THRESHOLD = 0.9f   // Large movements (increased)
+    private val SUDDEN_MOVEMENT_THRESHOLD = 1.5f  // Sudden/fast movements (increased)
 
     // Repetitive movement detection (fidgeting)
     private val REPETITIVE_PATTERN_WINDOW = 2000L // 2 second window to detect repetitive movements
-    private val SIMILAR_DIRECTION_THRESHOLD = 0.75f // Higher threshold for similarity (more strict)
-    private val DIRECTION_CHANGE_THRESHOLD = -0.5f // Only strong direction reversals count
+    private val SIMILAR_DIRECTION_THRESHOLD = 0.8f // Higher threshold for similarity (more strict)
+    private val DIRECTION_CHANGE_THRESHOLD = -0.6f // Only strong direction reversals count (more strict)
 
     // Maximum counts to prevent inflated values
-    private val MAX_DIRECTION_CHANGES = 150
-    private val MAX_SUDDEN_MOVEMENTS = 70
+    private val MAX_DIRECTION_CHANGES = 120
+    private val MAX_SUDDEN_MOVEMENTS = 50
 
-    // Window size for moving average filter
-    private val FILTER_WINDOW_SIZE = 6
+    // Increased window size for better noise filtering
+    private val FILTER_WINDOW_SIZE = 8
     private val recentReadings = mutableListOf<Triple<Float, Float, Float>>()
 
     // Time tracking for restlessness calculation
@@ -87,8 +87,11 @@ class MotionDetectionService(context: Context) : SensorEventListener {
     // Timestamp of session start
     private var sessionStartTime = 0L
 
-    // Force fidgeting to be maximum 33% of restlessness - manual cap to match your observations
-    private val MAX_FIDGETING_PERCENTAGE = 33
+    // Additional stationary detection
+    private var stationaryCount = 0
+    private val STATIONARY_THRESHOLD = 20  // Number of consecutive readings below threshold to consider stationary
+    private var isDeviceStationary = false
+    private var stationarySince = 0L
 
     // State flow for real-time updates
     private val _motionMetrics = MutableStateFlow(MotionMetrics())
@@ -105,6 +108,9 @@ class MotionDetectionService(context: Context) : SensorEventListener {
         directionChangesCount = 0
         fidgetingDetectedCount = 0
         consecutiveFidgetDetections = 0
+        stationaryCount = 0
+        isDeviceStationary = false
+        stationarySince = 0L
         isTrackingActive = true
         lastAcceleration = Triple(0f, 0f, 0f)
         movingAverageX = 0f
@@ -160,6 +166,9 @@ class MotionDetectionService(context: Context) : SensorEventListener {
         directionChangesCount = 0
         fidgetingDetectedCount = 0
         consecutiveFidgetDetections = 0
+        stationaryCount = 0
+        isDeviceStationary = false
+        stationarySince = 0L
         lastAcceleration = Triple(0f, 0f, 0f)
         movingAverageX = 0f
         movingAverageY = 0f
@@ -217,9 +226,53 @@ class MotionDetectionService(context: Context) : SensorEventListener {
         // Calculate magnitude of change
         val magnitude = sqrt(diffX * diffX + diffY * diffY + diffZ * diffZ)
 
-        // Store direction for pattern analysis if above noise threshold
+        // Improved stationary device detection
+        if (magnitude < NOISE_THRESHOLD) {
+            stationaryCount++
+            if (stationaryCount >= STATIONARY_THRESHOLD && !isDeviceStationary) {
+                // Device has become stationary
+                isDeviceStationary = true
+                stationarySince = currentTime
+                println("Device detected as stationary")
+            }
+        } else {
+            // Reset stationary counter if we detected movement
+            if (stationaryCount > 0) {
+                stationaryCount = 0
+            }
+
+            // If device was stationary and now moving, update status
+            if (isDeviceStationary && magnitude > NOISE_THRESHOLD * 1.5) {
+                isDeviceStationary = false
+                println("Device no longer stationary")
+            }
+        }
+
+        // If device is stationary, don't process for fidgeting or restlessness
+        if (isDeviceStationary) {
+            // Still update last values even when stationary
+            lastAcceleration = Triple(movingAverageX, movingAverageY, movingAverageZ)
+
+            // If stationary for more than 5 seconds, make sure all movement metrics are low/zero
+            if (currentTime - stationarySince > 5000) {
+                // Only update occasionally to prevent excessive processing
+                if (currentTime % 1000 < 100) { // Update about every second
+                    _motionMetrics.value = MotionMetrics(
+                        fidgetingScore = 0,
+                        generalMovementScore = 0,
+                        directionChanges = directionChangesCount,
+                        suddenMovements = 0,
+                        movementIntensity = 0f,
+                        restlessness = 0
+                    )
+                }
+            }
+            return
+        }
+
+        // Process movement data - only if above noise threshold and device not stationary
         if (magnitude > NOISE_THRESHOLD) {
-            // Create direction vector
+            // Store direction for pattern analysis
             val direction = Triple(diffX, diffY, diffZ)
 
             // Add to movement history
@@ -308,17 +361,14 @@ class MotionDetectionService(context: Context) : SensorEventListener {
                 // Check if direction changed significantly
                 val similarity = calculateVectorSimilarity(prev, curr)
                 if (magnitude > MEANINGFUL_MOVEMENT_THRESHOLD &&
-                    similarity < -0.4 && // More strict direction reversal
+                    similarity < DIRECTION_CHANGE_THRESHOLD && // More strict direction reversal
                     currentTime - lastDirectionChangeTime > 200) { // Not too frequent
 
-                    directionChangesCount++
+                    directionChangesCount = (directionChangesCount + 1).coerceAtMost(MAX_DIRECTION_CHANGES)
                     lastDirectionChangeTime = currentTime
                 }
             }
-        }
 
-        // Only record if movement is above noise threshold
-        if (magnitude > NOISE_THRESHOLD) {
             // Store data
             synchronized(motionData) {
                 motionData.add(
@@ -512,18 +562,25 @@ class MotionDetectionService(context: Context) : SensorEventListener {
             return MotionMetrics()
         }
 
+        // If device is detected as stationary for a significant time, return zero values
+        if (isDeviceStationary && System.currentTimeMillis() - stationarySince > 3000) {
+            return MotionMetrics(
+                fidgetingScore = 0,
+                generalMovementScore = 0,
+                directionChanges = directionChangesCount,
+                suddenMovements = 0,
+                movementIntensity = 0f,
+                restlessness = 0
+            )
+        }
+
         synchronized(motionData) {
             val totalFrames = motionData.size
             var mediumMovementFrames = 0
             var largeMovementFrames = 0
-            var directionChanges = 0
             var suddenMovements = 0
             var totalMagnitude = 0f
             var prevDirection = Triple(0, 0, 0)
-            var lastDirectionChangeTime = 0L
-
-            // Minimum intervals between counting events (to avoid overcounting)
-            val MIN_DIRECTION_CHANGE_INTERVAL = 200L
             var lastSuddenMovementTime = 0L
             val MIN_SUDDEN_MOVEMENT_INTERVAL = 400L
 
@@ -545,30 +602,7 @@ class MotionDetectionService(context: Context) : SensorEventListener {
                     }
                 }
 
-                // Track direction changes
-                val currDirection = Triple(
-                    if (point.x > NOISE_THRESHOLD) 1 else if (point.x < -NOISE_THRESHOLD) -1 else 0,
-                    if (point.y > NOISE_THRESHOLD) 1 else if (point.y < -NOISE_THRESHOLD) -1 else 0,
-                    if (point.z > NOISE_THRESHOLD) 1 else if (point.z < -NOISE_THRESHOLD) -1 else 0
-                )
-
-                // Detect direction changes
-                if (prevDirection != Triple(0, 0, 0) && currDirection != Triple(0, 0, 0) &&
-                    (currDirection.first != 0 && prevDirection.first != 0 && currDirection.first != prevDirection.first ||
-                            currDirection.second != 0 && prevDirection.second != 0 && currDirection.second != prevDirection.second ||
-                            currDirection.third != 0 && prevDirection.third != 0 && currDirection.third != prevDirection.third)) {
-
-                    val now = point.timestamp
-                    if (now - lastDirectionChangeTime > MIN_DIRECTION_CHANGE_INTERVAL &&
-                        directionChanges < MAX_DIRECTION_CHANGES) {
-                        directionChanges++
-                        lastDirectionChangeTime = now
-                    }
-                }
-
-                if (currDirection != Triple(0, 0, 0)) {
-                    prevDirection = currDirection
-                }
+                // Track direction changes (already tracked in main processing)
 
                 totalMagnitude += point.magnitude
             }
@@ -592,15 +626,12 @@ class MotionDetectionService(context: Context) : SensorEventListener {
                 0
             }
 
-            // Calculate fidgeting as percentage of restlessness, with cap
-            var fidgetingPercentage = if (restlessMovementTime > 0) {
-                ((fidgetingMovementTime * 100f) / restlessMovementTime).toInt().coerceIn(0, MAX_FIDGETING_PERCENTAGE)
+            // Calculate fidgeting as percentage of restlessness - without artificial cap
+            val fidgetingPercentage = if (restlessMovementTime > 0) {
+                ((fidgetingMovementTime * 100f) / restlessMovementTime).toInt().coerceIn(0, 100)
             } else {
                 0
             }
-
-            // Adjust fidgeting based on detected patterns - make sure we're within reasonable range
-            fidgetingPercentage = fidgetingPercentage.coerceIn(0, MAX_FIDGETING_PERCENTAGE)
 
             // Debug output
             println("Motion analysis: Tracking=${totalTrackingTime}ms, " +
@@ -610,7 +641,7 @@ class MotionDetectionService(context: Context) : SensorEventListener {
             return MotionMetrics(
                 fidgetingScore = fidgetingPercentage,
                 generalMovementScore = generalMovementScore,
-                directionChanges = directionChanges,
+                directionChanges = directionChangesCount,
                 suddenMovements = suddenMovements,
                 movementIntensity = movementIntensity,
                 restlessness = restlessnessPercentage

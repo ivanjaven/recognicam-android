@@ -27,7 +27,12 @@ import com.example.recognicam.presentation.theme.Error
 import com.example.recognicam.presentation.theme.Info
 import com.example.recognicam.presentation.theme.Success
 import com.example.recognicam.presentation.theme.Warning
+import com.example.recognicam.presentation.viewmodel.AttentionShiftingTaskResultUI
+import com.example.recognicam.presentation.viewmodel.CPTTaskResult
 import com.example.recognicam.presentation.viewmodel.FullAssessmentResult
+import com.example.recognicam.presentation.viewmodel.GoNoGoTaskResultUI
+import com.example.recognicam.presentation.viewmodel.ReadingTaskResultUI
+import com.example.recognicam.presentation.viewmodel.WorkingMemoryTaskResultUI
 import java.text.SimpleDateFormat
 import java.util.*
 
@@ -434,43 +439,43 @@ fun TaskPerformanceSummaryCard(result: FullAssessmentResult) {
                 modifier = Modifier.padding(bottom = 16.dp)
             )
 
-            // Individual task result summaries
+            // Individual task result summaries - now using actual data from task results
             TaskSummaryItem(
                 taskName = "Continuous Performance Test",
-                summary = "Sustained attention task: ${getCPTPerformanceSummary(getTaskScore(result, "CPT"))}",
-                score = getTaskScore(result, "CPT")
+                summary = "Sustained attention task: ${getCPTPerformanceSummary(getActualTaskScore(result, "CPT"))}",
+                score = getActualTaskScore(result, "CPT")
             )
 
             Divider(modifier = Modifier.padding(vertical = 8.dp))
 
             TaskSummaryItem(
                 taskName = "Reading Assessment",
-                summary = "Reading comprehension: ${getReadingPerformanceSummary(getTaskScore(result, "Reading"))}",
-                score = getTaskScore(result, "Reading")
+                summary = "Reading comprehension: ${getReadingPerformanceSummary(getActualTaskScore(result, "Reading"))}",
+                score = getActualTaskScore(result, "Reading")
             )
 
             Divider(modifier = Modifier.padding(vertical = 8.dp))
 
             TaskSummaryItem(
                 taskName = "Go/No-Go Task",
-                summary = "Impulse control task: ${getGoNoGoPerformanceSummary(getTaskScore(result, "GoNoGo"))}",
-                score = getTaskScore(result, "GoNoGo")
+                summary = "Impulse control task: ${getGoNoGoPerformanceSummary(getActualTaskScore(result, "GoNoGo"))}",
+                score = getActualTaskScore(result, "GoNoGo")
             )
 
             Divider(modifier = Modifier.padding(vertical = 8.dp))
 
             TaskSummaryItem(
                 taskName = "Working Memory Task",
-                summary = "Working memory task: ${getWorkingMemoryPerformanceSummary(getTaskScore(result, "WorkingMemory"))}",
-                score = getTaskScore(result, "WorkingMemory")
+                summary = "Working memory task: ${getWorkingMemoryPerformanceSummary(getActualTaskScore(result, "WorkingMemory"))}",
+                score = getActualTaskScore(result, "WorkingMemory")
             )
 
             Divider(modifier = Modifier.padding(vertical = 8.dp))
 
             TaskSummaryItem(
                 taskName = "Attention Shifting Task",
-                summary = "Cognitive flexibility task: ${getAttentionShiftingPerformanceSummary(getTaskScore(result, "AttentionShifting"))}",
-                score = getTaskScore(result, "AttentionShifting")
+                summary = "Cognitive flexibility task: ${getAttentionShiftingPerformanceSummary(getActualTaskScore(result, "AttentionShifting"))}",
+                score = getActualTaskScore(result, "AttentionShifting")
             )
         }
     }
@@ -540,6 +545,7 @@ fun CrossTaskAnalysisCard(result: FullAssessmentResult) {
                 modifier = Modifier.padding(bottom = 16.dp)
             )
 
+            // Using actual result data for the analysis
             // Response consistency pattern
             PatternAnalysisItem(
                 "Response Consistency",
@@ -652,26 +658,26 @@ fun BehavioralMarkersCard(result: FullAssessmentResult) {
             )
 
             Text(
-                text = "The most significant patterns detected across all assessment tasks:",
+                text = "The most significant behavioral patterns detected across all assessment tasks:",
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                 modifier = Modifier.padding(bottom = 16.dp)
             )
 
-            // Group markers by domain
+            // Group markers by domain for better organization and coloring
             val attentionMarkers = result.behavioralMarkers.filter {
                 it.name in listOf("Look Away Rate", "Sustained Attention", "Look Away Duration",
-                    "Attention Lapses", "Distractibility", "Response Time")
+                    "Attention Lapses", "Distractibility", "Response Time", "Task Accuracy")
             }
 
             val hyperactivityMarkers = result.behavioralMarkers.filter {
                 it.name in listOf("Fidgeting Score", "Direction Changes", "Restlessness",
-                    "Facial Movement", "Blink Rate")
+                    "Facial Movement", "Blink Rate", "Face Visibility")
             }
 
             val impulsivityMarkers = result.behavioralMarkers.filter {
                 it.name in listOf("Sudden Movements", "Emotion Changes", "Emotion Variability",
-                    "Response Variability")
+                    "Response Variability", "Missed Responses")
             }
 
             // Other markers
@@ -679,7 +685,7 @@ fun BehavioralMarkersCard(result: FullAssessmentResult) {
                 it.name in (attentionMarkers + hyperactivityMarkers + impulsivityMarkers).map { m -> m.name }
             }
 
-            // Display attention markers
+            // Only show sections with markers
             if (attentionMarkers.isNotEmpty()) {
                 Text(
                     text = "Attention Markers",
@@ -689,7 +695,8 @@ fun BehavioralMarkersCard(result: FullAssessmentResult) {
                 )
 
                 attentionMarkers.forEach { marker ->
-                    MarkerItem(marker)
+                    // Use Error/red color for all attention markers
+                    MarkerItemWithDomainColor(marker, Error)
                     Spacer(modifier = Modifier.height(8.dp))
                 }
             }
@@ -704,7 +711,8 @@ fun BehavioralMarkersCard(result: FullAssessmentResult) {
                 )
 
                 hyperactivityMarkers.forEach { marker ->
-                    MarkerItem(marker)
+                    // Use Info/blue color for all hyperactivity markers
+                    MarkerItemWithDomainColor(marker, Info)
                     Spacer(modifier = Modifier.height(8.dp))
                 }
             }
@@ -719,7 +727,8 @@ fun BehavioralMarkersCard(result: FullAssessmentResult) {
                 )
 
                 impulsivityMarkers.forEach { marker ->
-                    MarkerItem(marker)
+                    // Use Warning/orange color for all impulsivity markers
+                    MarkerItemWithDomainColor(marker, Warning)
                     Spacer(modifier = Modifier.height(8.dp))
                 }
             }
@@ -734,23 +743,27 @@ fun BehavioralMarkersCard(result: FullAssessmentResult) {
                 )
 
                 otherMarkers.forEach { marker ->
-                    MarkerItem(marker)
+                    // Use gray for other markers
+                    MarkerItemWithDomainColor(marker, MaterialTheme.colorScheme.onSurfaceVariant)
                     Spacer(modifier = Modifier.height(8.dp))
                 }
+            }
+
+            // If no markers at all, show a message
+            if (result.behavioralMarkers.isEmpty()) {
+                Text(
+                    text = "No significant behavioral markers were detected across the tasks.",
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.padding(top = 8.dp)
+                )
             }
         }
     }
 }
 
 @Composable
-fun MarkerItem(marker: BehavioralMarker) {
-    // Determine marker color based on significance
-    val markerColor = when (marker.significance) {
-        3 -> Error
-        2 -> Warning
-        else -> Info
-    }
-
+fun MarkerItemWithDomainColor(marker: BehavioralMarker, domainColor: Color) {
     // Determine level text based on value relative to threshold
     val levelText = when {
         marker.value > marker.threshold * 1.5f -> "High"
@@ -758,6 +771,9 @@ fun MarkerItem(marker: BehavioralMarker) {
         marker.value > marker.threshold * 0.5f -> "Normal"
         else -> "Low"
     }
+
+    // Determine if higher values are better or worse
+    val isHigherBetter = marker.name in listOf("Sustained Attention", "Face Visibility", "Task Accuracy")
 
     // Format value display
     val displayValue = if (marker.value >= 100f) {
@@ -771,11 +787,11 @@ fun MarkerItem(marker: BehavioralMarker) {
         modifier = Modifier.fillMaxWidth(),
         verticalAlignment = Alignment.CenterVertically
     ) {
-        // Marker color dot
+        // Marker color dot - using domain color
         Box(
             modifier = Modifier
                 .size(10.dp)
-                .background(markerColor, CircleShape)
+                .background(domainColor, CircleShape)
         )
 
         Spacer(modifier = Modifier.width(8.dp))
@@ -789,7 +805,7 @@ fun MarkerItem(marker: BehavioralMarker) {
 
         Spacer(modifier = Modifier.width(8.dp))
 
-        // Show progress bar
+        // Show progress bar with more helpful coloring based on better/worse
         Box(
             modifier = Modifier
                 .width(100.dp)
@@ -800,11 +816,28 @@ fun MarkerItem(marker: BehavioralMarker) {
             // Calculate fill percentage (0-100%)
             val fillPercentage = (marker.value / (marker.threshold * 2f)).coerceIn(0f, 1f)
 
+            // Choose color based on whether high values are better
+            val barColor = if (isHigherBetter) {
+                // For metrics where high is good (like sustained attention)
+                when {
+                    marker.value > marker.threshold * 1.2f -> Success // High is good
+                    marker.value > marker.threshold * 0.8f -> Warning // Moderate
+                    else -> Error // Low is bad
+                }
+            } else {
+                // For metrics where high is bad (like distractibility)
+                when {
+                    marker.value > marker.threshold * 1.2f -> Error // High is bad
+                    marker.value > marker.threshold * 0.8f -> Warning // Moderate
+                    else -> Success // Low is good
+                }
+            }
+
             Box(
                 modifier = Modifier
                     .fillMaxHeight()
                     .fillMaxWidth(fillPercentage)
-                    .background(markerColor)
+                    .background(barColor)
             )
         }
 
@@ -823,7 +856,7 @@ fun MarkerItem(marker: BehavioralMarker) {
             Text(
                 text = levelText,
                 style = MaterialTheme.typography.bodySmall,
-                color = markerColor
+                color = domainColor
             )
         }
     }
@@ -1029,7 +1062,7 @@ fun InterpretationCard(result: FullAssessmentResult) {
 private fun getDetailedInterpretationText(result: FullAssessmentResult): String {
     return when {
         result.overallScore >= 70 ->
-            "Your assessment shows moderate behavioral patterns associated with ADHD across multiple tasks. While some aspects of your performance were typical, you demonstrated notable difficulties in specific areas. The patterns weren't consistent across all domains, which is common in ADHD where symptoms can vary by situation and cognitive demand."
+            "Your assessment shows strong behavioral patterns associated with ADHD across multiple tasks. You demonstrated notable difficulties with sustained attention, impulse control, and consistent performance. These patterns were consistent across different cognitive domains, suggesting they may impact various aspects of daily functioning."
 
         result.overallScore >= 40 ->
             "Your assessment shows moderate behavioral patterns associated with ADHD across multiple tasks. While some aspects of your performance were typical, you demonstrated notable difficulties in specific areas. The patterns weren't consistent across all domains, which is common in ADHD where symptoms can vary by situation and cognitive demand."
@@ -1086,15 +1119,40 @@ private fun getImpulsivityDescription(score: Int): String {
     }
 }
 
-private fun getTaskScore(result: FullAssessmentResult, taskType: String): Int {
-    // Extract scores from the taskResults map
+// This function now uses the actual task scores from the results
+private fun getActualTaskScore(result: FullAssessmentResult, taskType: String): Int {
     return when (taskType) {
-        "CPT" -> 82 // High inattention
-        "Reading" -> 80 // High inattention
-        "GoNoGo" -> 54 // Moderate impulsivity
-        "WorkingMemory" -> 69 // Moderate issues
-        "AttentionShifting" -> 53 // Moderate flexibility issues
-        else -> result.overallScore
+        "CPT" -> {
+            val cptResult = result.taskResults["CPT"]
+            if (cptResult is CPTTaskResult) {
+                cptResult.adhdAssessment.adhdProbabilityScore
+            } else 0
+        }
+        "Reading" -> {
+            val readingResult = result.taskResults["Reading"]
+            if (readingResult is ReadingTaskResultUI) {
+                readingResult.adhdAssessment.adhdProbabilityScore
+            } else 0
+        }
+        "GoNoGo" -> {
+            val goNoGoResult = result.taskResults["GoNoGo"]
+            if (goNoGoResult is GoNoGoTaskResultUI) {
+                goNoGoResult.adhdAssessment.adhdProbabilityScore
+            } else 0
+        }
+        "WorkingMemory" -> {
+            val workingMemoryResult = result.taskResults["WorkingMemory"]
+            if (workingMemoryResult is WorkingMemoryTaskResultUI) {
+                workingMemoryResult.adhdAssessment.adhdProbabilityScore
+            } else 0
+        }
+        "AttentionShifting" -> {
+            val attentionShiftingResult = result.taskResults["AttentionShifting"]
+            if (attentionShiftingResult is AttentionShiftingTaskResultUI) {
+                attentionShiftingResult.adhdAssessment.adhdProbabilityScore
+            } else 0
+        }
+        else -> 0
     }
 }
 
@@ -1143,12 +1201,12 @@ private fun getAttentionShiftingPerformanceSummary(score: Int): String {
     }
 }
 
-// Cross-task pattern analysis functions
+// Cross-task pattern analysis functions - now using actual result data
 private fun getResponseConsistencyAnalysis(result: FullAssessmentResult): String {
     val variabilityLevel = (result.attentionScore * 0.3 + result.impulsivityScore * 0.7).toInt()
 
     return when {
-        variabilityLevel >= 70 -> "High inconsistency in response patterns. Your performance showed some variability in speed and accuracy, particularly when tasks became more demanding. This moderate inconsistency suggests some challenges in maintaining consistent attention."
+        variabilityLevel >= 70 -> "High inconsistency in response patterns. Your performance showed significant variability in speed and accuracy, particularly when tasks became more demanding. This inconsistency strongly suggests challenges in maintaining consistent attention and inhibitory control."
         variabilityLevel >= 40 -> "Moderate inconsistency in response patterns. Your performance showed some variability in speed and accuracy, particularly when tasks became more demanding. This moderate inconsistency suggests some challenges in maintaining consistent attention."
         variabilityLevel >= 20 -> "Mild inconsistency in responses. Your performance was generally consistent with occasional lapses, particularly during longer task periods. This mild variability is common in many individuals."
         else -> "Highly consistent response patterns across all tasks. Your performance maintained steady speed and accuracy throughout the assessment, which indicates strong attentional control."
@@ -1185,8 +1243,11 @@ private fun getAttentionSustainabilitySignificance(result: FullAssessmentResult)
 }
 
 private fun getCognitiveFlexibilityAnalysis(result: FullAssessmentResult): String {
+    // Use actual Attention Shifting task score instead of hard-coded value
+    val attentionShiftingScore = getActualTaskScore(result, "AttentionShifting")
+
     val flexibility = (result.attentionScore * 0.4 + result.impulsivityScore * 0.2 +
-            getTaskScore(result, "AttentionShifting") * 0.4).toInt()
+            attentionShiftingScore * 0.4).toInt()
 
     return when {
         flexibility >= 70 -> "Significant challenges with cognitive flexibility. You had considerable difficulty adapting to changing rules and requirements across tasks. This pattern of inflexible thinking is often seen in ADHD, particularly when combined with impulsivity."
@@ -1197,8 +1258,11 @@ private fun getCognitiveFlexibilityAnalysis(result: FullAssessmentResult): Strin
 }
 
 private fun getCognitiveFlexibilitySignificance(result: FullAssessmentResult): Int {
+    // Use actual Attention Shifting task score instead of hard-coded value
+    val attentionShiftingScore = getActualTaskScore(result, "AttentionShifting")
+
     val flexibility = (result.attentionScore * 0.4 + result.impulsivityScore * 0.2 +
-            getTaskScore(result, "AttentionShifting") * 0.4).toInt()
+            attentionShiftingScore * 0.4).toInt()
 
     return when {
         flexibility >= 70 -> 3

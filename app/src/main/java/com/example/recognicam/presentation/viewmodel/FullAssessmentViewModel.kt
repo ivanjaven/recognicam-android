@@ -143,7 +143,7 @@ class FullAssessmentViewModel(private val context: Context) : ViewModel() {
         val hyperactivityScores = calculateHyperactivityScores()
         val impulsivityScores = calculateImpulsivityScores()
 
-        // Combine behavioral markers from all tasks
+        // Combine behavioral markers from all tasks using an average approach
         val allMarkers = combineMarkers()
 
         // Get the latest sensor metrics from the most recent task (usually attention shifting)
@@ -155,7 +155,7 @@ class FullAssessmentViewModel(private val context: Context) : ViewModel() {
                 hyperactivityScores.average() * 0.3 +
                 impulsivityScores.average() * 0.25).toInt()
 
-        // Calculate confidence level
+        // Calculate confidence level (starting from 60 instead of 80)
         val confidenceLevel = calculateConfidenceLevel(
             faceVisibility = latestFaceMetrics.faceVisiblePercentage,
             tasksCompleted = countCompletedTasks(),
@@ -278,41 +278,66 @@ class FullAssessmentViewModel(private val context: Context) : ViewModel() {
     }
 
     private fun combineMarkers(): List<BehavioralMarker> {
-        val allMarkers = mutableListOf<BehavioralMarker>()
+        // Collect all markers from all tasks
+        val allMarkers = mutableMapOf<String, MutableList<BehavioralMarker>>()
 
-        // Collect markers from all tasks
-        cptResult?.adhdAssessment?.behavioralMarkers?.let {
-            allMarkers.addAll(it)
-        }
-
-        readingResult?.adhdAssessment?.behavioralMarkers?.let {
-            allMarkers.addAll(it)
-        }
-
-        goNoGoResult?.adhdAssessment?.behavioralMarkers?.let {
-            allMarkers.addAll(it)
-        }
-
-        workingMemoryResult?.adhdAssessment?.behavioralMarkers?.let {
-            allMarkers.addAll(it)
-        }
-
-        attentionShiftingResult?.adhdAssessment?.behavioralMarkers?.let {
-            allMarkers.addAll(it)
-        }
-
-        // Group by marker name and take the most significant for each
-        return allMarkers
-            .groupBy { it.name }
-            .map { (_, markers) ->
-                // For each marker name, pick the one with highest significance * (value/threshold) ratio
-                markers.maxByOrNull {
-                    it.significance * (it.value / it.threshold)
-                } ?: markers.first()
+        // Add markers from each task to their respective groups by name
+        fun addMarkersFromTask(markers: List<BehavioralMarker>?) {
+            markers?.forEach { marker ->
+                if (!allMarkers.containsKey(marker.name)) {
+                    allMarkers[marker.name] = mutableListOf()
+                }
+                allMarkers[marker.name]?.add(marker)
             }
-            .sortedByDescending {
-                it.significance * (it.value / it.threshold)
+        }
+
+        // Collect markers from all completed tasks
+        addMarkersFromTask(cptResult?.adhdAssessment?.behavioralMarkers)
+        addMarkersFromTask(readingResult?.adhdAssessment?.behavioralMarkers)
+        addMarkersFromTask(goNoGoResult?.adhdAssessment?.behavioralMarkers)
+        addMarkersFromTask(workingMemoryResult?.adhdAssessment?.behavioralMarkers)
+        addMarkersFromTask(attentionShiftingResult?.adhdAssessment?.behavioralMarkers)
+
+        // Process each marker group to create a weighted average
+        val combinedMarkers = mutableListOf<BehavioralMarker>()
+
+        allMarkers.forEach { (name, markers) ->
+            if (markers.isNotEmpty()) {
+                // Calculate the average value
+                val avgValue = markers.sumOf { it.value.toDouble() } / markers.size
+
+                // Calculate the average threshold
+                val avgThreshold = markers.sumOf { it.threshold.toDouble() } / markers.size
+
+                // Determine significance based on the ratio of average value to average threshold
+                val ratio = avgValue / avgThreshold
+                val significance = when {
+                    ratio > 1.2 -> 3    // High significance if value exceeds threshold by 20%+
+                    ratio > 0.8 -> 2    // Medium significance if value is within 20% of threshold
+                    ratio > 0.4 -> 1    // Low significance if value is 40-80% of threshold
+                    else -> 0           // No significance if value is less than 40% of threshold
+                }
+
+                // Only include markers with some significance
+                if (significance > 0) {
+                    combinedMarkers.add(
+                        BehavioralMarker(
+                            name = name,
+                            value = avgValue.toFloat(),
+                            threshold = avgThreshold.toFloat(),
+                            significance = significance,
+                            description = markers.first().description // Keep the description from the first marker
+                        )
+                    )
+                }
             }
+        }
+
+        // Sort by domain and significance
+        return combinedMarkers.sortedWith(
+            compareByDescending<BehavioralMarker> { it.significance }
+                .thenByDescending { it.value / it.threshold }
+        )
     }
 
     private fun getLatestFaceMetrics(): FaceMetrics {
@@ -349,8 +374,8 @@ class FullAssessmentViewModel(private val context: Context) : ViewModel() {
         duration: Int,
         markerCount: Int
     ): Int {
-        // Start with a high baseline confidence
-        var confidence = 80
+        // Start with a moderate baseline confidence (changed from 80 to 60)
+        var confidence = 60
 
         // Number of completed tasks has high impact
         confidence += when (tasksCompleted) {

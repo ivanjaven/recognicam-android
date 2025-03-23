@@ -28,7 +28,7 @@ fun HomeScreen(navController: NavController) {
     ) {
         // Header
         Text(
-            text = "ADHD Assessment",
+            text = "ReCogniCam",
             style = MaterialTheme.typography.headlineMedium,
             fontWeight = FontWeight.Bold,
             modifier = Modifier.padding(bottom = 8.dp)
