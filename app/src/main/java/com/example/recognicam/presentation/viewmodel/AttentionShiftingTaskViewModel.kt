@@ -3,24 +3,28 @@ package com.example.recognicam.presentation.viewmodel
 import android.content.Context
 import android.os.CountDownTimer
 import androidx.lifecycle.ViewModelProvider
+import androidx.lifecycle.viewModelScope
 import com.example.recognicam.core.base.BaseAssessmentTaskViewModel
 import com.example.recognicam.data.analysis.ADHDAnalyzer
 import com.example.recognicam.data.analysis.ADHDAssessmentResult
 import com.example.recognicam.data.sensor.FaceMetrics
 import com.example.recognicam.data.sensor.MotionMetrics
 import com.example.recognicam.domain.entity.AttentionShiftingTaskResult as DomainAttentionShiftingTaskResult
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.launch
 import kotlin.math.sqrt
 import kotlin.random.Random
+
 
 enum class Rule {
     COLOR, SHAPE
 }
 
 sealed class AttentionShiftingTaskState {
-    object PreInstructions : AttentionShiftingTaskState()
+    object PreInstructions : AttentionShiftingTaskState() // New state
     object Instructions : AttentionShiftingTaskState()
     data class Countdown(val count: Int) : AttentionShiftingTaskState()
     object Running : AttentionShiftingTaskState()
@@ -69,6 +73,10 @@ class AttentionShiftingTaskViewModel(
 
     private val _currentRule = MutableStateFlow<Rule>(Rule.COLOR)
     val currentRule: StateFlow<Rule> = _currentRule.asStateFlow()
+
+    // New property for rule change notification
+    private val _ruleJustChanged = MutableStateFlow(false)
+    val ruleJustChanged: StateFlow<Boolean> = _ruleJustChanged.asStateFlow()
 
     // Performance metrics
     private var correctResponses = 0
@@ -155,64 +163,73 @@ class AttentionShiftingTaskViewModel(
             missedResponses++
         }
 
-        // Wait before showing next stimulus (1-2 seconds)
-        val delay = Random.nextInt(1000, 2001).toLong()
+        // Launch in a coroutine scope to handle delays
+        viewModelScope.launch {
+            // Wait before showing next stimulus (1-2 seconds)
+            val delay = Random.nextInt(1000, 2001).toLong()
+            delay(delay)
 
-        stimulusTimer = object : CountDownTimer(delay, delay) {
-            override fun onTick(millisUntilFinished: Long) {}
+            // Increment trial count
+            trialCount++
 
-            override fun onFinish() {
-                // Increment trial count
-                trialCount++
+            // Check if we should shift rules - CHANGED FROM EVERY 7 TRIALS TO EVERY 5 TRIALS
+            val shouldShiftRule = trialCount % 5 == 0 && trialCount > 0
 
-                // Check if we should shift rules - CHANGED FROM EVERY 7 TRIALS TO EVERY 5 TRIALS
-                val shouldShiftRule = trialCount % 5 == 0 && trialCount > 0
-
-                if (shouldShiftRule) {
-                    _currentRule.value = when (_currentRule.value) {
-                        Rule.COLOR -> Rule.SHAPE
-                        Rule.SHAPE -> Rule.COLOR
-                    }
-                    justShifted = true
-                    ruleShifts++
-                } else {
-                    // Reset justShifted after 2 trials following a rule change
-                    if (trialCount % 5 >= 2) {
-                        justShifted = false
-                    }
+            if (shouldShiftRule) {
+                _currentRule.value = when (_currentRule.value) {
+                    Rule.COLOR -> Rule.SHAPE
+                    Rule.SHAPE -> Rule.COLOR
                 }
+                justShifted = true
+                ruleShifts++
 
-                // Randomly select shape and color
-                val newShape = shapes.random()
-                val newColor = colors.random()
+                // Signal that the rule has just changed
+                _ruleJustChanged.value = true
 
-                _currentShape.value = newShape
-                _currentColor.value = newColor
-
-                // Determine if this is a target based on current rule
-                isTargetStimulus = when (_currentRule.value) {
-                    Rule.COLOR -> newColor == "blue"
-                    Rule.SHAPE -> newShape == "square"
+                // Add a delay before showing the next stimulus
+                delay(2500)
+            } else {
+                // Reset justShifted after 2 trials following a rule change
+                if (trialCount % 5 >= 2) {
+                    justShifted = false
                 }
-
-                // Reset response tracking
-                respondedToCurrent = false
-
-                // Show the stimulus
-                stimulusShownTime = System.currentTimeMillis()
-                _stimulusVisible.value = true
-
-                // Set timer for response window (2 seconds)
-                stimulusTimer = object : CountDownTimer(2000, 2000) {
-                    override fun onTick(millisUntilFinished: Long) {}
-
-                    override fun onFinish() {
-                        // Present next stimulus
-                        presentNextStimulus()
-                    }
-                }.start()
             }
-        }.start()
+
+            // Randomly select shape and color
+            val newShape = shapes.random()
+            val newColor = colors.random()
+
+            _currentShape.value = newShape
+            _currentColor.value = newColor
+
+            // Determine if this is a target based on current rule
+            isTargetStimulus = when (_currentRule.value) {
+                Rule.COLOR -> newColor == "blue"
+                Rule.SHAPE -> newShape == "square"
+            }
+
+            // Reset response tracking
+            respondedToCurrent = false
+
+            // Show the stimulus
+            stimulusShownTime = System.currentTimeMillis()
+            _stimulusVisible.value = true
+
+            // Set timer for response window (2 seconds)
+            stimulusTimer = object : CountDownTimer(2000, 2000) {
+                override fun onTick(millisUntilFinished: Long) {}
+
+                override fun onFinish() {
+                    // Present next stimulus
+                    presentNextStimulus()
+                }
+            }.start()
+        }
+    }
+
+    // New method to acknowledge that the rule change has been shown
+    fun acknowledgeRuleChange() {
+        _ruleJustChanged.value = false
     }
 
     fun handleResponse() {
@@ -372,7 +389,7 @@ class AttentionShiftingTaskViewModel(
 
     class Factory(
         private val context: Context,
-        private val isPartOfFullAssessment: Boolean = false  // Add this parameter
+        private val isPartOfFullAssessment: Boolean = false
     ) : ViewModelProvider.Factory {
         @Suppress("UNCHECKED_CAST")
         override fun <T : androidx.lifecycle.ViewModel> create(modelClass: Class<T>): T {

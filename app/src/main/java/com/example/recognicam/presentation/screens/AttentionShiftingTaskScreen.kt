@@ -119,6 +119,8 @@ fun AttentionShiftingTaskScreen(
         }
 
         is AttentionShiftingTaskState.Running -> {
+            val ruleJustChanged by viewModel.ruleJustChanged.collectAsState()
+
             Box(modifier = Modifier.fillMaxSize()) {
                 // Invisible camera view to process facial data if permission granted
                 if (cameraPermissionGranted) {
@@ -166,7 +168,6 @@ fun AttentionShiftingTaskScreen(
                     )
                 }
 
-                // Timer display
                 // Timer display
                 Row(
                     modifier = Modifier
@@ -216,14 +217,41 @@ fun AttentionShiftingTaskScreen(
                     }
                 }
 
-                // Current rule instruction
+                // Rule change overlay
+                RuleChangeOverlay(
+                    isVisible = ruleJustChanged,
+                    newRule = currentRule,
+                    onAnimationComplete = { viewModel.acknowledgeRuleChange() }
+                )
+
+                // Current rule instruction - Enhanced for better visibility
                 Box(modifier = Modifier.align(Alignment.BottomCenter)) {
                     val ruleText = when (currentRule) {
                         Rule.COLOR -> "Current Rule: Tap when you see BLUE shapes"
                         Rule.SHAPE -> "Current Rule: Tap when you see SQUARE shapes"
                     }
 
-                    InstructionBar(text = ruleText)
+                    // Make the instruction bar more prominent based on current rule
+                    val backgroundColor = when (currentRule) {
+                        Rule.COLOR -> MaterialTheme.colorScheme.primary.copy(alpha = 0.2f)
+                        Rule.SHAPE -> MaterialTheme.colorScheme.secondary.copy(alpha = 0.2f)
+                    }
+
+                    Box(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .background(backgroundColor)
+                            .padding(vertical = 15.dp),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Text(
+                            text = ruleText,
+                            style = MaterialTheme.typography.bodyLarge.copy(
+                                fontWeight = FontWeight.Bold
+                            ),
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
                 }
             }
         }
