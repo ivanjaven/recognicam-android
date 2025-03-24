@@ -259,7 +259,7 @@ fun FullAssessmentInstructions(
                 AssessmentTaskItem(
                     title = "Continuous Performance Test",
                     description = "Tap when you see the letter X appear on screen",
-                    duration = "30 seconds"
+                    duration = "2 minutes"
                 )
 
                 Divider(modifier = Modifier.padding(vertical = 12.dp))
@@ -267,7 +267,7 @@ fun FullAssessmentInstructions(
                 AssessmentTaskItem(
                     title = "Reading Assessment",
                     description = "Read a short passage and answer questions about it",
-                    duration = "2-3 minutes"
+                    duration = "2-4 minutes"
                 )
 
                 Divider(modifier = Modifier.padding(vertical = 12.dp))
@@ -275,7 +275,7 @@ fun FullAssessmentInstructions(
                 AssessmentTaskItem(
                     title = "Go/No-Go Task",
                     description = "Tap for green circles, don't tap for red circles",
-                    duration = "30 seconds"
+                    duration = "2 minutes"
                 )
 
                 Divider(modifier = Modifier.padding(vertical = 12.dp))
@@ -283,7 +283,7 @@ fun FullAssessmentInstructions(
                 AssessmentTaskItem(
                     title = "Working Memory Task",
                     description = "Tap when a shape matches the previous one",
-                    duration = "30 seconds"
+                    duration = "2 minutes"
                 )
 
                 Divider(modifier = Modifier.padding(vertical = 12.dp))
@@ -291,7 +291,7 @@ fun FullAssessmentInstructions(
                 AssessmentTaskItem(
                     title = "Attention Shifting Task",
                     description = "Follow changing rules for shapes and colors",
-                    duration = "30 seconds"
+                    duration = "2 minutes"
                 )
             }
         }
